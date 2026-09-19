@@ -1,5 +1,6 @@
 import { MIN_RUN } from "../duplication/duplication.service.ts";
 import { DEFAULT_OBS } from "../observability/observability.types.ts";
+import { DEFAULT_UNTRUSTED_JUDGE } from "../untrusted/untrusted.types.ts";
 import type { Policy } from "./policy.types.ts";
 
 export const DEFAULT_LESSONS_POLICY: Policy["intelligence"]["lessons"] = {
@@ -77,6 +78,7 @@ export const DEFAULTS: Policy = {
     enabled: false,
     extraTools: [],
     extraCommandPatterns: [],
+    judge: { ...DEFAULT_UNTRUSTED_JUDGE, thresholds: { ...DEFAULT_UNTRUSTED_JUDGE.thresholds } },
   },
   planGate: {
     enabled: false,

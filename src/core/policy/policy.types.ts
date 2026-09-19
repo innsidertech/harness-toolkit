@@ -8,7 +8,7 @@ export type CommentMode = "declared" | "strict" | "resolvable";
 import type { EffortLevel } from "../../contracts/effort.ts";
 import type { AppendFilesMode } from "../gate/gate.types.ts";
 import type { LessonsSyncMode } from "../lesson/lesson.sync.ts";
-import type { UntrustedMode } from "../untrusted/untrusted.types.ts";
+import type { UntrustedJudgeConfig, UntrustedMode } from "../untrusted/untrusted.types.ts";
 
 // invariant: one word per posture. A second spelling for any of them is what let `"mode": "focus"` reach
 // the loader unvalidated, match no branch, and silently produce a policy with no posture line.
@@ -105,6 +105,12 @@ export type Policy = {
     mode: UntrustedMode;
     extraTools: string[];
     extraCommandPatterns: string[];
+    /**
+     * The paraphrase half of the rail: one question set per recall entry, put to a third party over the network.
+     * Off by default, and disabled is indistinguishable from absent — no request, no state file, no record
+     * ([/decisions/ad-146.md](/decisions/ad-146.md)).
+     */
+    judge: UntrustedJudgeConfig;
   };
   planGate: {
     enabled: boolean;
@@ -147,7 +153,11 @@ export type PartialPolicy = Partial<Policy> & {
   docs?: Partial<Policy["docs"]>;
   comments?: Partial<Policy["comments"]>;
   obs?: Partial<Policy["obs"]>;
-  untrustedContent?: Partial<Policy["untrustedContent"]>;
+  untrustedContent?: Partial<Policy["untrustedContent"]> & {
+    judge?: Partial<UntrustedJudgeConfig> & {
+      thresholds?: Partial<UntrustedJudgeConfig["thresholds"]>;
+    };
+  };
   planGate?: Partial<Policy["planGate"]>;
   rules?: Partial<Policy["rules"]>;
   shell?: Partial<Policy["shell"]>;

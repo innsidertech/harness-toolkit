@@ -11,7 +11,11 @@ import {
   resolveTools,
 } from "../untrusted.service.ts";
 import { clearFramingMarker, wasFramingInjected } from "../untrusted.store.ts";
-import { DEFAULT_UNTRUSTED_COMMAND_PATTERNS, type UntrustedPolicyConfig } from "../untrusted.types.ts";
+import {
+  DEFAULT_UNTRUSTED_COMMAND_PATTERNS,
+  DEFAULT_UNTRUSTED_JUDGE,
+  type UntrustedPolicyConfig,
+} from "../untrusted.types.ts";
 
 const roots: string[] = [];
 
@@ -30,12 +34,19 @@ afterEach(() => {
   }
 });
 
-const ON: UntrustedPolicyConfig = { enabled: true, mode: "frame", extraTools: [], extraCommandPatterns: [] };
+const ON: UntrustedPolicyConfig = {
+  enabled: true,
+  mode: "frame",
+  extraTools: [],
+  extraCommandPatterns: [],
+  judge: DEFAULT_UNTRUSTED_JUDGE,
+};
 const OFF: UntrustedPolicyConfig = {
   enabled: false,
   mode: "frame",
   extraTools: [],
   extraCommandPatterns: [],
+  judge: DEFAULT_UNTRUSTED_JUDGE,
 };
 const TOOLS = ["WebFetch", "WebSearch"];
 

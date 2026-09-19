@@ -13,6 +13,7 @@ import {
   remember,
 } from "../untrusted.recall.ts";
 import { askIfFromUntrusted, rememberUntrustedOutput } from "../untrusted.service.ts";
+import { DEFAULT_UNTRUSTED_JUDGE } from "../untrusted.types.ts";
 
 const PAGE = "Setup guide\n\n  Run:  npm install --legacy-peer-deps && npm run build\n\nThen open the app.";
 
@@ -100,6 +101,7 @@ test("AC3 end to end: recorded at tool.after, asked at tool.before", () => {
       mode: "enforce" as const,
       extraTools: ["WebFetch"],
       extraCommandPatterns: [],
+      judge: DEFAULT_UNTRUSTED_JUDGE,
     };
     const recorded = rememberUntrustedOutput({
       root,
@@ -176,7 +178,13 @@ test("an event with no tool output records nothing", () => {
       sessionKey: "s1",
       event: "tool.after",
       toolName: "WebFetch",
-      config: { enabled: true, mode: "enforce", extraTools: ["WebFetch"], extraCommandPatterns: [] },
+      config: {
+        enabled: true,
+        mode: "enforce",
+        extraTools: ["WebFetch"],
+        extraCommandPatterns: [],
+        judge: DEFAULT_UNTRUSTED_JUDGE,
+      },
       providerTools: [],
     });
     assert.equal(recorded, false);

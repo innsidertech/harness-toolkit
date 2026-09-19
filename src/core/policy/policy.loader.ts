@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { flagsDir, machineConfigPath, projectConfigPath } from "../../platform/paths.ts";
 import { lessonsSyncMode, resolveSyncMode, type SyncModeResolution } from "../lesson/lesson.sync.ts";
+import { judgeConfigErrors } from "../untrusted/untrusted.types.ts";
 import { DEFAULTS } from "./policy.defaults.ts";
 import { type PostureResolution, resolvePosture } from "./policy.posture.ts";
 import type { PartialPolicy, Policy } from "./policy.types.ts";
@@ -34,7 +35,21 @@ function deepMerge(base: Policy, patch: PartialPolicy): Policy {
     supplyChain: { ...base.supplyChain, ...patch.supplyChain },
     duplication: { ...base.duplication, ...patch.duplication },
     obs: { ...base.obs, ...patch.obs },
-    untrustedContent: { ...base.untrustedContent, ...patch.untrustedContent },
+    // why: three levels deep, because `thresholds` is its own object. A two-level merge would let a config that
+    // sets one threshold drop the other to undefined — the same defect `intelligence.lessons` already merges
+    // around one level up.
+    untrustedContent: {
+      ...base.untrustedContent,
+      ...patch.untrustedContent,
+      judge: {
+        ...base.untrustedContent.judge,
+        ...patch.untrustedContent?.judge,
+        thresholds: {
+          ...base.untrustedContent.judge.thresholds,
+          ...patch.untrustedContent?.judge?.thresholds,
+        },
+      },
+    },
     planGate: { ...base.planGate, ...patch.planGate },
     shell: { ...base.shell, ...patch.shell },
     secrets: { ...base.secrets, ...patch.secrets },
@@ -98,6 +113,23 @@ export function resolveProjectSyncMode(root: string): SyncModeResolution {
   return { ...resolution, coercedIn: path };
 }
 
+function judgeErrorsFor(pair: ConfigPair): string[] {
+  return [
+    ...judgeConfigErrors(pair.fromUser.untrustedContent?.judge),
+    ...judgeConfigErrors(pair.fromProject.untrustedContent?.judge),
+  ];
+}
+
+/**
+ * The judge fields this project's configuration cannot be read from, with the field named.
+ *
+ * invariant: read from the same pair the loader merges, so what `doctor` reports and what the hooks refused are
+ * one answer rather than two computations of it ([/decisions/ad-020.md](/decisions/ad-020.md)).
+ */
+export function resolveJudgeConfigErrors(root: string): string[] {
+  return judgeErrorsFor(readConfigPair(root));
+}
+
 export function loadPolicy(root: string): Policy {
   const pair = readConfigPair(root);
   const merged = deepMerge(deepMerge(DEFAULTS, pair.fromUser), pair.fromProject);
@@ -113,6 +145,14 @@ export function loadPolicy(root: string): Policy {
   // why: normalised here rather than at each read site, so `Policy` stays honestly typed and a config written
   // before the mode existed keeps the behaviour its operator chose ([/decisions/ad-050.md](/decisions/ad-050.md)).
   merged.intelligence.lessons.syncRulesFile = lessonsSyncMode(merged.intelligence.lessons.syncRulesFile);
+
+  // invariant: a judge field nobody can read switches the judge off rather than the policy load. This runs inside
+  // every hook, so throwing on a typo in one number would break every tool call in the session — and leaving the
+  // value in place would report a capability as enabled while it asked about nothing
+  // ([/decisions/ad-076.md](/decisions/ad-076.md), [/decisions/ad-146.md](/decisions/ad-146.md)).
+  if (judgeErrorsFor(pair).length > 0) {
+    merged.untrustedContent.judge.enabled = false;
+  }
 
   return merged;
 }

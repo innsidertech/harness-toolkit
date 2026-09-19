@@ -10,6 +10,16 @@ export const promptSubmitHandler: Handler = async (event: HarnessEvent, ctx: Han
   // why: the prompt is the turn boundary, so this is where the once-per-turn framing marker resets.
   coreFacade.untrusted.clearFramingMarker(event.projectDir, event.sessionKey);
   coreFacade.untrusted.clearRecall(event.projectDir, event.sessionKey);
+  // why: cleared then written in that order, so the turn's own prompt is what remains and a judge switched off
+  // between turns leaves nothing on disk. With the judge disabled — the default — nothing is read and no file is
+  // created, which is what keeps an upgraded install identical to v0.16.2 ([/decisions/ad-146.md](/decisions/ad-146.md)).
+  coreFacade.untrusted.clearOperatorPrompt(event.projectDir, event.sessionKey);
+  coreFacade.untrusted.rememberOperatorPrompt({
+    root: event.projectDir,
+    sessionKey: event.sessionKey,
+    text: event.text,
+    judge: ctx.policy.untrustedContent.judge,
+  });
   // why: every stop-time gate diffs against this, not against HEAD. A turn that commits moves HEAD past its
   // own changes, and each gate then read an empty diff and skipped ([/decisions/ad-058.md](/decisions/ad-058.md)).
   // why: the exact AD-114 divergence, now against turn_base_sha instead of a rule's proof sha — a worktree

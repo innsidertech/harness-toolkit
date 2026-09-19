@@ -240,6 +240,11 @@ import {
   nextLoop,
   resetLoop,
 } from "./turn/turn.loop-counter.ts";
+import {
+  clearOperatorPrompt,
+  readOperatorPrompt,
+  rememberOperatorPrompt,
+} from "./untrusted/untrusted.prompt.ts";
 import { findInRecall, recallMessage, remember } from "./untrusted/untrusted.recall.ts";
 import {
   askIfFromUntrusted,
@@ -422,6 +427,9 @@ export const coreFacade = {
     askIfFromUntrusted,
     evaluateUntrustedContent,
     clearFramingMarker,
+    rememberOperatorPrompt,
+    readOperatorPrompt,
+    clearOperatorPrompt,
   },
   plan: {
     detectPlan,
