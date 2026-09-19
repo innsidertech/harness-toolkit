@@ -108,6 +108,43 @@ TLC_HOME="$PWD" tlc harness test
 CLAUDE_PROJECT_DIR="$PWD" TLC_PROJECT_DIR="$PWD" tlc harness test
 ```
 
+### What must be proven, and at which level
+
+The gate above says where tests live and how to run them. It does not say which code has to be proven, or how
+much of its input space a proof must assert to count — so that was decided separately and is written here, as a
+floor rather than a description of what exists today.
+
+| Code | Required proofs | Coverage expectation |
+| --- | --- | --- |
+| Decides, and is reached across the hook boundary | one at the handler boundary **and** one at its own layer | the handler's contract through `runHandler`; one asserted case per row of the decision table at its own layer |
+| Decides, not reached across a boundary | one at its own layer | one asserted case per row of the decision table |
+| Vendor I/O with a doubled transport | one per response state at its own layer | every status and body shape the vendor's contract names, with the transport injected — never the network |
+| CLI surface (`doctor`, `obs`, `lessons`, `status`) | one in `tools/__test__` | each reported condition, plus the case where the surface stays silent |
+| Instrumentation, pass-throughs | none of its own | covered by its consumer's proof |
+
+**A test proves the layer where it asserts, not the layers it passes through.** An end-to-end test that
+traverses a branch exercises one path through it and cannot fail when a second path is wrong, so obligations add
+up rather than substitute: a decision reached across a hook is two claims, the boundary's contract and the table
+behind it, and the second is the one that goes missing — it hides behind the observable outcome that names the
+first.
+
+**Classify on the shape of the code, not the name of the file.** A `.service.ts` can be a pass-through and an
+entrypoint can hold the densest branch table in the change. Count the decision points and name the members:
+"dispatches over five failure categories, four preconditions" is contestable, "looks like business logic" is
+not. Those names are also what a coverage claim gets joined against — a set that exists only as a number cannot
+be checked for the member nobody wrote down.
+
+**Derive from the code, not from the suite you found.** A module with no tests at a level is evidence about its
+history, not evidence that its logic needs none. Where an analogue exists, follow it by code shape rather than
+by folder: the verbatim half of the untrusted rail (`src/core/untrusted/__test__/untrusted.test.ts`) is the
+pattern for a decision table at its own layer, `src/entrypoints/__test__/tool-before.test.ts` for a boundary
+through `runHandler`, and `tools/__test__/doctor.allowlist.test.ts` for one report per condition.
+
+Two failures worth naming because both have happened here. A proof whose expected value is built three files
+away is weak however green it runs — the assertion expression is the evidence, so the value belongs beside it.
+And a comparison between two fixtures that do not actually differ passes by construction: an equality assertion
+earns nothing unless the two sides could have come apart.
+
 ### What the gate deliberately cannot see
 
 The suite runs against the working tree with a fake home, which is what keeps it from writing into yours — and it is
