@@ -283,7 +283,7 @@ async function rulesDecision(event: HarnessEvent, ctx: HandlerContext): Promise<
 
 function handleShellBefore(event: HarnessEvent, ctx: HandlerContext): Decision {
   const { policy } = ctx;
-  const decision = coreFacade.shellPolicy.evaluateShellCommand({
+  return coreFacade.shellPolicy.evaluateShellCommand({
     command: event.command ?? "",
     sessionKey: event.sessionKey,
     projectDir: event.projectDir,
@@ -292,8 +292,22 @@ function handleShellBefore(event: HarnessEvent, ctx: HandlerContext): Decision {
     stallDetection: policy.shell.stallDetection,
     stallRepeatThreshold: policy.shell.stallRepeatThreshold,
   });
-  recordShellDecision(event, ctx, decision);
-  return decision;
+}
+
+/**
+ * invariant: the judge runs last, after every check that costs nothing. It is the only one that leaves the
+ * machine, so a command the floor refuses, the verbatim rail already asked about, an operator rule denies, a
+ * diverged policy baseline blocks, or the shell rail itself answers must never have paid for it — and must never
+ * have sent anything under a policy the harness has just declared untrustworthy
+ * ([/decisions/ad-146.md](/decisions/ad-146.md), [/decisions/ad-076.md](/decisions/ad-076.md)).
+ */
+async function shellBeforeDecision(event: HarnessEvent, ctx: HandlerContext): Promise<Decision> {
+  const shell = handleShellBefore(event, ctx);
+  if (shell.kind !== "allow") {
+    return shell;
+  }
+  const judged = await judgeDecision(event, ctx);
+  return judged.kind === "abstain" ? shell : judged;
 }
 
 // why: a read cannot mutate the policy surface, so it is the one class of event that stays available while a
@@ -402,18 +416,6 @@ export const toolBeforeHandler: Handler = async (
     return untrustedAsk;
   }
 
-  /**
-   * why here: after the verbatim check, because a command that check already matched is a command this rail has
-   * already asked about, and the judge would spend a network call to reach the same answer. This is the first
-   * check in the harness that leaves the machine, so every cheaper way of abstaining runs before it
-   * ([/decisions/ad-146.md](/decisions/ad-146.md)).
-   */
-  const judged = await judgeDecision(event, ctx);
-  if (judged.kind !== "abstain") {
-    recordShellDecisionIfShell(event, ctx, judged);
-    return judged;
-  }
-
   // invariant: unconditional, for the same reason the floor is. This detects a policy that changed without
   // a harness command, so reading a policy field to decide whether to look would let the mutation switch
   // off its own detector.
@@ -472,8 +474,11 @@ export const toolBeforeHandler: Handler = async (
   }
 
   switch (event.event) {
-    case "shell.before":
-      return handleShellBefore(event, ctx);
+    case "shell.before": {
+      const decision = await shellBeforeDecision(event, ctx);
+      recordShellDecision(event, ctx, decision);
+      return decision;
+    }
     case "mcp.before":
     case "read.before":
       return { kind: "allow" };

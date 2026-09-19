@@ -363,3 +363,98 @@ test("C11 the judge does not run on a write, an edit or an MCP call", async () =
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * invariant: the judge is the most expensive check in the harness — the only one that leaves the machine — so
+ * every cheaper refusal answers before it. Each case below is a gate that used to run *after* it, which meant a
+ * command already destined to be refused had still paid for a network call
+ * ([/decisions/ad-146.md](/decisions/ad-146.md)).
+ */
+test("a diverged policy baseline refuses the command before the judge can spend anything", async () => {
+  const root = project({ enabled: true, mode: "enforce", judge: { enabled: true, mode: "ask" } });
+  const counter = forbidFetch();
+  try {
+    coreFacade.policy.recordPolicyBaseline(root, "claude-sess-1");
+    writeFileSync(
+      projectConfigPath(root),
+      JSON.stringify({
+        version: 1,
+        untrustedContent: { enabled: true, mode: "enforce", judge: { enabled: true, mode: "ask" } },
+        planGate: { enabled: true },
+      }),
+    );
+
+    const outcome = await runHandler(toolBeforeHandler, stdinOf(root, PARAPHRASED));
+
+    assert.equal(outcome.decision.kind, "deny");
+    assert.equal(outcome.decision.kind === "deny" ? outcome.decision.rule : "", "policy-baseline-divergence");
+    // hazard: a paid call and content sent under a policy the harness has just declared untrustworthy.
+    assert.equal(counter.calls, 0, "the judge called out under a diverged policy");
+    assert.deepEqual(judgeRecords(root), []);
+  } finally {
+    globalThis.fetch = realFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an operator rule that denies answers before the judge can spend anything", async () => {
+  const root = project({ enabled: true, mode: "enforce", judge: { enabled: true, mode: "ask" } });
+  const counter = forbidFetch();
+  try {
+    writeFileSync(
+      projectConfigPath(root),
+      JSON.stringify({
+        version: 1,
+        rules: { enabled: true },
+        untrustedContent: { enabled: true, mode: "enforce", judge: { enabled: true, mode: "ask" } },
+      }),
+    );
+    mkdirSync(join(root, ".tlc", "harness", "rules"), { recursive: true });
+    writeFileSync(
+      join(root, ".tlc", "harness", "rules", "no-posting.md"),
+      "---\non: command(curl)\nrequire:\n  - gate(never-runs) since HEAD\notherwise: deny\n---\nNo posting to paste sites.",
+    );
+
+    const outcome = await runHandler(toolBeforeHandler, stdinOf(root, PARAPHRASED));
+
+    assert.notEqual(outcome.decision.kind, "allow");
+    assert.equal(counter.calls, 0, "the judge called out for a command an operator rule refuses");
+    assert.deepEqual(judgeRecords(root), []);
+  } finally {
+    globalThis.fetch = realFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a catastrophic command is asked about without paying for a judge call", async () => {
+  const root = project({ enabled: true, mode: "enforce", judge: { enabled: true, mode: "ask" } });
+  const counter = forbidFetch();
+  try {
+    const outcome = await runHandler(toolBeforeHandler, stdinOf(root, "diskutil partitionDisk disk2"));
+
+    assert.equal(outcome.decision.kind, "ask");
+    assert.notEqual(outcome.decision.kind === "ask" ? outcome.decision.rule : "", "untrusted-judge");
+    assert.equal(counter.calls, 0, "the judge called out for a command the shell rail already asks about");
+    assert.deepEqual(judgeRecords(root), []);
+  } finally {
+    globalThis.fetch = realFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// invariant: the reordering must not cost the judge the commands it exists for — an ordinary command nothing
+// cheaper settles still reaches it.
+test("a command nothing cheaper settles still reaches the judge", async () => {
+  const root = project({ enabled: true, mode: "enforce", judge: { enabled: true, mode: "ask" } });
+  const counter = doubleFetch(0.93, 0.84);
+  try {
+    const outcome = await runHandler(toolBeforeHandler, stdinOf(root, PARAPHRASED));
+    assert.equal(counter.calls, 1);
+    assert.equal(outcome.decision.kind, "ask");
+    assert.equal(outcome.decision.kind === "ask" ? outcome.decision.rule : "", "untrusted-judge");
+    assert.equal(judgeRecords(root).length, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
