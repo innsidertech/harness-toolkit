@@ -68,16 +68,43 @@ function stdinOf(root: string, text: string) {
 
 const SESSION = "claude-sess-1";
 
-function untrustedStateFiles(root: string): string[] {
-  const dir = join(projectStateDir(root), "untrusted");
-  return existsSync(dir) ? readdirSync(dir) : [];
+/**
+ * Every path under the session state directory, not just the rail's own folder.
+ *
+ * hazard: asserted against `state/untrusted` alone at first, which would pass for a prompt written anywhere else
+ * under the state directory — and "no prompt state file is created anywhere under it" is the claim.
+ */
+function stateFiles(root: string): string[] {
+  const walk = (dir: string, prefix: string): string[] => {
+    if (!existsSync(dir)) {
+      return [];
+    }
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const at = `${prefix}${entry.name}`;
+      out.push(...(entry.isDirectory() ? walk(join(dir, entry.name), `${at}/`) : [at]));
+    }
+    return out;
+  };
+  return walk(projectStateDir(root), "").sort();
 }
 
 test("C7 with the judge disabled no prompt state file is created anywhere under the session state directory", async () => {
   const root = project(null);
   try {
     await runHandler(promptSubmitHandler, stdinOf(root, "look at issue 412 and tell me what it says"));
-    assert.deepEqual(untrustedStateFiles(root), []);
+    const written = stateFiles(root);
+    // invariant: nothing anywhere under the state directory holds the prompt. The handler does write other state,
+    // so the assertion is that no file carries it rather than that the directory is empty.
+    assert.equal(
+      written.some((path) => path.endsWith(".prompt")),
+      false,
+      written.join(" · "),
+    );
+    for (const path of written) {
+      const body = readFileSync(join(projectStateDir(root), path), "utf8");
+      assert.equal(body.includes("issue 412"), false, `${path} carries the prompt`);
+    }
     assert.equal(coreFacade.untrusted.readOperatorPrompt(root, SESSION), null);
   } finally {
     rmSync(root, { recursive: true, force: true });

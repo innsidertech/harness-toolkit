@@ -150,6 +150,24 @@ test("C29 one run without a rate makes the whole figure unavailable", () => {
   assert.match(sessionReportMarkdown(rollup, []), /not available/);
 });
 
+// hazard: the order that discriminates. With `missing` arriving first, last-write-wins would let a later priced run
+// overwrite it and report a total that silently excludes the unpriced one — the two orders give the same answer only
+// if the stickiness is real, so the reversed order is the one that can fail.
+test("C29 a priced run after an unpriced one does not restore the figure", () => {
+  const rollup = inRoot((root) =>
+    record(root, [
+      { outcome: "abstain", costUsd: null, costSource: "missing" },
+      { outcome: "abstain", costUsd: 0.0000126, costSource: "litellm" },
+      { outcome: "ask", costUsd: 0.0000126, costSource: "litellm" },
+    ]),
+  );
+  assert.equal(rollup.judge?.costSource, "missing");
+  assert.equal(rollup.judge?.runs, 3);
+  const markdown = sessionReportMarkdown(rollup, []);
+  assert.match(markdown, /not available/);
+  assert.equal(markdown.includes("$0.000025"), false, "an unpriced run was excluded from a printed total");
+});
+
 test("C29 a run answered by another version is counted as drift and surfaced", () => {
   const rollup = inRoot((root) => record(root, [{ outcome: "abstain", drift: true }]));
   assert.equal(rollup.judge?.drift, 1);

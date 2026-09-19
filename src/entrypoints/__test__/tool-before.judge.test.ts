@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -122,7 +130,28 @@ function forbidFetch(): Counter {
   return counter;
 }
 
-function judgeRecords(root: string): Array<Record<string, unknown>> {
+/** Every path under the session state directory, relative and sorted — what "no state file appears" means. */
+function stateFiles(root: string): string[] {
+  const base = projectStateDir(root);
+  const walk = (dir: string, prefix: string): string[] => {
+    if (!existsSync(dir)) {
+      return [];
+    }
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const at = `${prefix}${entry.name}`;
+      out.push(...(entry.isDirectory() ? walk(join(dir, entry.name), `${at}/`) : [at]));
+    }
+    return out;
+  };
+  return walk(base, "").sort();
+}
+
+function recordKinds(root: string): string[] {
+  return obsRecords(root).map((event) => String(event.kind));
+}
+
+function obsRecords(root: string): Array<Record<string, unknown>> {
   const path = join(projectStateDir(root), "obs.jsonl");
   if (!existsSync(path)) {
     return [];
@@ -130,8 +159,13 @@ function judgeRecords(root: string): Array<Record<string, unknown>> {
   return readFileSync(path, "utf8")
     .split("\n")
     .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-    .filter((event) => (event.attrs as Record<string, unknown> | undefined)?.rail === "untrusted-judge");
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function judgeRecords(root: string): Array<Record<string, unknown>> {
+  return obsRecords(root).filter(
+    (event) => (event.attrs as Record<string, unknown> | undefined)?.rail === "untrusted-judge",
+  );
 }
 
 test("C11 with the judge disabled a non-empty recall makes no request, writes no judge record and abstains", async () => {
@@ -148,21 +182,42 @@ test("C11 with the judge disabled a non-empty recall makes no request, writes no
   }
 });
 
-// why: the same command on a build with no judge at all takes the allow path, so "no added latency" is the same
-// statement as "no branch was entered". A timing assertion would measure the machine, not the code.
+/**
+ * why compared rather than timed: a timing assertion measures the machine. What the criterion means by "no added
+ * latency" is that no branch which costs anything was entered, and that is observable — the two installs must
+ * produce the same decision, the same files under the state directory and the same sequence of records.
+ *
+ * hazard: the two configs must actually differ, or the comparison is true by construction. One has no `judge` key
+ * at all — the shape every v0.16.2 config has — and the other switches it off explicitly.
+ */
 test("C11 a disabled judge leaves the command on exactly the path it took before the judge existed", async () => {
-  const withJudgeOff = project({ enabled: true, mode: "enforce" });
-  const withoutJudgeKey = project({ enabled: true, mode: "enforce" });
+  const asBeforeTheJudge = project({ enabled: true, mode: "enforce" });
+  const explicitlyOff = project({
+    enabled: true,
+    mode: "enforce",
+    judge: {
+      enabled: false,
+      mode: "ask",
+      thresholds: { contentInstructsAgent: 0, commandFollowsContent: 0 },
+    },
+  });
   const counter = forbidFetch();
   try {
-    const a = await runHandler(toolBeforeHandler, stdinOf(withJudgeOff, "npm run build --silent"));
-    const b = await runHandler(toolBeforeHandler, stdinOf(withoutJudgeKey, "npm run build --silent"));
+    const a = await runHandler(toolBeforeHandler, stdinOf(asBeforeTheJudge, "npm run build --silent"));
+    const b = await runHandler(toolBeforeHandler, stdinOf(explicitlyOff, "npm run build --silent"));
+
     assert.deepEqual(a.decision, b.decision);
     assert.equal(counter.calls, 0);
+    // invariant: thresholds of 0 would make every entry clear, so a judge that ran at all here would ask. It does
+    // not run, because `enabled` is read before anything with a cost.
+    assert.equal(a.decision.kind, "allow");
+    assert.deepEqual(stateFiles(asBeforeTheJudge), stateFiles(explicitlyOff));
+    assert.deepEqual(recordKinds(asBeforeTheJudge), recordKinds(explicitlyOff));
+    assert.deepEqual(judgeRecords(explicitlyOff), []);
   } finally {
     globalThis.fetch = realFetch;
-    rmSync(withJudgeOff, { recursive: true, force: true });
-    rmSync(withoutJudgeKey, { recursive: true, force: true });
+    rmSync(asBeforeTheJudge, { recursive: true, force: true });
+    rmSync(explicitlyOff, { recursive: true, force: true });
   }
 });
 
