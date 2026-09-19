@@ -12,6 +12,7 @@ import {
 } from "../platform/git.ts";
 import { flagsDir } from "../platform/paths.ts";
 import { runCommand } from "../platform/process.ts";
+import { adviseAndRecord } from "./advisory.ts";
 import type { Handler, HandlerContext } from "./run.ts";
 import { main } from "./run.ts";
 import {
@@ -267,6 +268,79 @@ export async function runLockedGate(args: {
   return { kind: "ran", artifact, reused: cached !== null };
 }
 
+type FailGateArgs = {
+  root: string;
+  provider: string;
+  sessionKey: string;
+  gate: string;
+  artifact: LastGateArtifact;
+  policy: Policy;
+};
+
+/**
+ * The fingerprint says "identical". This asks the question it cannot: is this the same problem, reworded.
+ *
+ * invariant: record only. The fingerprint's hit count still decides everything that stagnation decides; the reading
+ * sits beside it so the two can be compared ([/decisions/ad-148.md](/decisions/ad-148.md)).
+ */
+async function adviseOnStagnation(args: FailGateArgs, fingerprintHits: number): Promise<void> {
+  const jev = args.policy.intelligence.jev;
+  if (!jev.enabled || jev.stagnation === "off") {
+    return;
+  }
+  const previous = coreFacade.advisor.readPreviousFailure(args.root, args.sessionKey);
+  coreFacade.advisor.rememberFailure(args.root, args.sessionKey, args.artifact.outputTail);
+  if (previous === null) {
+    return;
+  }
+  await adviseAndRecord({
+    ...args,
+    use: "stagnation",
+    items: [{ id: "same", state: { previous_failure: previous, current_failure: args.artifact.outputTail } }],
+    existing: {
+      gate: args.gate,
+      fingerprint_hits: fingerprintHits,
+      fingerprint_repeated: fingerprintHits >= 2,
+    },
+  });
+}
+
+/** How many lessons, from the head of the selector's own ranking, the advisor is asked about. */
+const LESSON_RANK_CANDIDATES = 12;
+
+/**
+ * Ask which of the selector's candidates address this failure.
+ *
+ * invariant: the readings change the order only in `apply`. In `record` they are written beside the rank the
+ * selector gave, and `undefined` is returned so the selection is exactly what it was.
+ */
+async function lessonRerank(
+  args: FailGateArgs,
+  lessonArgs: Parameters<typeof coreFacade.lesson.rankedEligible>[0],
+): Promise<Record<string, number> | undefined> {
+  const jev = args.policy.intelligence.jev;
+  if (!jev.enabled || jev.lessonRank === "off") {
+    return undefined;
+  }
+  const candidates = coreFacade.lesson
+    .rankedEligible(lessonArgs)
+    .filter((row) => !row.lesson.pinned)
+    .slice(0, LESSON_RANK_CANDIDATES);
+  const outcome = await adviseAndRecord({
+    ...args,
+    use: "lessonRank",
+    items: candidates.map((row) => ({
+      id: row.lesson.id,
+      state: {
+        failure_output: args.artifact.outputTail,
+        lesson: `${row.lesson.instruction} Avoid: ${row.lesson.avoid} Prefer: ${row.lesson.prefer}`,
+      },
+    })),
+    existing: { gate: args.gate, selector_order: candidates.map((row) => row.lesson.id).join(",") },
+  });
+  return jev.lessonRank === "apply" && outcome.outcome === "advised" ? outcome.scores : undefined;
+}
+
 async function failGate(args: {
   root: string;
   provider: string;
@@ -286,6 +360,7 @@ async function failGate(args: {
     output: args.artifact.outputTail,
   });
   const hits = coreFacade.stagnation.trackFingerprint(args.root, args.sessionKey, fingerprint);
+  await adviseOnStagnation(args, hits);
   const category = coreFacade.gate.isCommandResolutionFailure({
     exitCode: args.artifact.exitCode,
     output: args.artifact.outputTail,
@@ -340,14 +415,15 @@ async function failGate(args: {
   const resolution = coreFacade.stagnation.resolutionFor(args.root, fingerprint);
   const historyLine = resolution ? coreFacade.stagnation.resolutionHistoryLine(resolution) : "";
 
+  const lessonArgs = {
+    projectDir: args.root,
+    config: intel.lessons,
+    mode: "retry" as const,
+    gate: args.gate,
+    text: hits >= 2 ? `stagnation ${args.artifact.outputTail}` : args.artifact.outputTail,
+  };
   const selected = intel.lessons.enabled
-    ? await coreFacade.lesson.selectLessons({
-        projectDir: args.root,
-        config: intel.lessons,
-        mode: "retry",
-        gate: args.gate,
-        text: hits >= 2 ? `stagnation ${args.artifact.outputTail}` : args.artifact.outputTail,
-      })
+    ? await coreFacade.lesson.selectLessons({ ...lessonArgs, rerank: await lessonRerank(args, lessonArgs) })
     : { lessons: [], usedIds: [], omitted: 0 };
   const lessonsBlock = formatLessonsBlock(
     selected.lessons,

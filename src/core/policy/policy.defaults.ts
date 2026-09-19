@@ -1,3 +1,4 @@
+import { DEFAULT_JEV_ADVISOR } from "../advisor/advisor.types.ts";
 import { MIN_RUN } from "../duplication/duplication.service.ts";
 import { DEFAULT_OBS } from "../observability/observability.types.ts";
 import { DEFAULT_UNTRUSTED_JUDGE } from "../untrusted/untrusted.types.ts";
@@ -78,7 +79,11 @@ export const DEFAULTS: Policy = {
     enabled: false,
     extraTools: [],
     extraCommandPatterns: [],
-    judge: { ...DEFAULT_UNTRUSTED_JUDGE, thresholds: { ...DEFAULT_UNTRUSTED_JUDGE.thresholds } },
+    judge: {
+      ...DEFAULT_UNTRUSTED_JUDGE,
+      thresholds: { ...DEFAULT_UNTRUSTED_JUDGE.thresholds },
+      scope: { ...DEFAULT_UNTRUSTED_JUDGE.scope },
+    },
   },
   planGate: {
     enabled: false,
@@ -105,6 +110,7 @@ export const DEFAULTS: Policy = {
     budgetContinue: false,
     budgetContinueAfterLoops: 3,
     lessons: { ...DEFAULT_LESSONS_POLICY },
+    jev: { ...DEFAULT_JEV_ADVISOR },
   },
   mcpPrime: [],
   bootstrapExtra: [],

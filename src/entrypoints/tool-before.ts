@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { Decision, HarnessEvent } from "../contracts/index.ts";
+import { isWriteTool } from "../contracts/index.ts";
 import { coreFacade } from "../core/index.ts";
 import type { AddedLine } from "../platform/git.ts";
 import { diffProposedAgainstDisk, diffTwoStrings, localRepoRemote } from "../platform/git.ts";
@@ -198,16 +199,39 @@ function recordShellDecision(event: HarnessEvent, ctx: HandlerContext, decision:
  * failed. The `ask` itself needs no record here — `recordShellDecision` already writes every rail decision with
  * its rule ([/decisions/ad-076.md](/decisions/ad-076.md)).
  */
+/**
+ * What the agent is about to do, as text the judge can be asked about.
+ *
+ * invariant: `command` is the only kind in scope by default. An edit sends file contents and a tool call sends its
+ * arguments, which is a wider consent than the one an operator gave by switching the judge on
+ * ([/decisions/ad-146.md](/decisions/ad-146.md)).
+ */
+function judgedAction(
+  event: HarnessEvent,
+): { kind: "command" | "edit" | "mcp"; action: string | undefined } | null {
+  if (event.event === "shell.before") {
+    return { kind: "command", action: event.command };
+  }
+  if (event.event === "mcp.before") {
+    return { kind: "mcp", action: `${event.toolName ?? "mcp"} ${JSON.stringify(event.toolInput ?? {})}` };
+  }
+  if (event.event === "tool.before" && isWriteTool(event.toolName) && event.proposedContent) {
+    return { kind: "edit", action: `${filePathOf(event) ?? "(no path)"}\n${event.proposedContent}` };
+  }
+  return null;
+}
+
 async function judgeDecision(event: HarnessEvent, ctx: HandlerContext): Promise<Decision> {
-  if (event.event !== "shell.before") {
+  const judged = judgedAction(event);
+  if (judged === null) {
     return { kind: "abstain" };
   }
-  const outcome = await coreFacade.untrusted.judgeShellCommand({
+  const outcome = await coreFacade.untrusted.judgeAction({
     root: event.projectDir,
     sessionKey: event.sessionKey,
-    command: event.command,
+    kind: judged.kind,
+    action: judged.action,
     config: ctx.policy.untrustedContent,
-    redactOutput: ctx.policy.secrets.redactOutput,
   });
   if (outcome.outcome === "skipped") {
     return { kind: "abstain" };
@@ -308,6 +332,12 @@ async function shellBeforeDecision(event: HarnessEvent, ctx: HandlerContext): Pr
   }
   const judged = await judgeDecision(event, ctx);
   return judged.kind === "abstain" ? shell : judged;
+}
+
+/** invariant: last, like the shell path — a call any cheaper check settled never pays for the network. */
+async function allowUnlessJudged(event: HarnessEvent, ctx: HandlerContext): Promise<Decision> {
+  const judged = await judgeDecision(event, ctx);
+  return judged.kind === "abstain" ? { kind: "allow" } : judged;
 }
 
 // why: a read cannot mutate the policy surface, so it is the one class of event that stays available while a
@@ -480,6 +510,7 @@ export const toolBeforeHandler: Handler = async (
       return decision;
     }
     case "mcp.before":
+      return allowUnlessJudged(event, ctx);
     case "read.before":
       return { kind: "allow" };
     case "tool.before": {
@@ -491,7 +522,8 @@ export const toolBeforeHandler: Handler = async (
       if (guard.kind !== "allow") {
         return guard;
       }
-      return handleToolBefore(event, ctx);
+      const tool = await handleToolBefore(event, ctx);
+      return tool.kind === "allow" ? allowUnlessJudged(event, ctx) : tool;
     }
     default:
       return { kind: "allow" };

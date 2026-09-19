@@ -155,6 +155,7 @@ Handoff section and a link back to this index.
 | [AD-145](/decisions/ad-145.md) | a session's last real shell cwd is recalled wherever the host reports none | active |
 | [AD-146](/decisions/ad-146.md) | the untrusted-content judge asks about rewritten commands, over the network, and only ever asks | active |
 | [AD-147](/decisions/ad-147.md) | Claude Code's adapter dropped tool output for shell and MCP events, so enforce mode remembered nothing | active |
+| [AD-148](/decisions/ad-148.md) | Jev is asked about four of the harness's own judgement calls, beside the rule that already makes each, and changes none of them | active |
 
 ## Archived
 

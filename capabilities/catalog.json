@@ -379,20 +379,49 @@
     {
       "id": "untrustedContentJudge",
       "configPath": "untrustedContent.judge.enabled",
-      "title": "Untrusted-content judge (rewritten commands)",
-      "summary": "Asks before a shell command that does what outside content asked for, even reworded.",
-      "benefit": "Closes the gap the verbatim check states: an injected instruction the agent restates in its own words passes that check unseen. For each thing the session read from outside, one question set is put to TypeSafe's Jev asking whether the content tries to control an agent and whether the proposed command does what it asked for; above both thresholds the operator is asked, with the source named. It only ever asks, never denies.",
-      "tradeOff": "Four costs, all of them real. It makes a network call inside a hook, which nothing else in this harness does. The text of issues, pages and MCP results, your own prompt and the proposed command leave your machine for a third-party service hosted in the United States \u2014 secrets are redacted first, and the source rather than the text is what is recorded locally. It costs money per check, about US$0.03 per 1,000 checks at the measured token size. And it adds latency to every shell command in a session that read anything external \u2014 measured at 600 ms p95 for one request from Dublin, with a whole recall sent in one wave. It ships in record mode: it pays those costs and interrupts nobody, because the thresholds come from 20 authored cases and are not calibrated. Needs mode: enforce and a key in TYPESAFE_API_KEY or the machine home's credentials.json; doctor names it when enabled and inert.",
+      "title": "Untrusted-content judge (rewritten actions)",
+      "summary": "Asks before a command, or an opted-in edit or MCP call, that does what outside content asked for, even reworded.",
+      "benefit": "Closes the gap the verbatim check states: an injected instruction the agent restates in its own words passes that check unseen. When the session reads something from outside, TypeSafe's Jev is asked once whether that content tries to control an agent; content that does not is never asked about again, so a session that only read ordinary pages pays nothing per command. For content that does, each command is asked about: does it do what the content asked for. Above both thresholds the operator is asked, with the source named. It only ever asks, never denies. `scope` extends the same judgement to edits, MCP calls and the agent's own reply, each its own opt-in; a reply has already been sent, so it is recorded and never asked about.",
+      "tradeOff": "Four costs, all of them real. It makes a network call inside a hook, which only the Jev capabilities in this harness do. The text of issues, pages and MCP results, your own prompt and the proposed command leave your machine for a third-party service hosted in the United States \u2014 and with `scope` widened, so do file contents being written, MCP arguments and the agent's reply. Secrets are always redacted first, whatever `secrets.redactOutput` says, and the local record keeps the source and the agent's own command, never the content and never your prompt. It costs money per check, about US$0.03 per 1,000 checks at the measured token size. And it adds latency: one request when something external is read, and one per suspicious entry before each command after that \u2014 measured at 600 ms p95 for one request from Dublin, and never longer than `timeoutMs` for a whole run. It ships in record mode: it pays those costs and interrupts nobody, because the thresholds come from 20 authored cases and are not calibrated; the report's `cleared` count is how often `ask` mode would have interrupted. Needs mode: enforce and a key in TYPESAFE_API_KEY or the machine home's credentials.json; doctor names it when enabled and inert.",
       "defaultOn": false,
       "sinceCatalogVersion": 16,
       "fires": [
-        "shell.before"
+        "tool.after",
+        "shell.before",
+        "tool.before",
+        "response.after"
       ],
       "verdict": "ask",
       "inspect": "tlc harness obs report \u2014 runs, asks, failures by category, latency and input tokens; tlc harness doctor reports it when enabled and inert or degraded",
       "asks": [
         "mode: record | ask",
+        "scope: command | edit | mcp | response",
         "thresholds",
+        "timeoutMs"
+      ],
+      "recommend": "off"
+    },
+    {
+      "id": "jevAdvisors",
+      "configPath": "intelligence.jev.enabled",
+      "title": "Jev advisors (a second reading beside four of the harness's own judgement calls)",
+      "summary": "Asks Jev the question four existing rules answer with a pattern, and records both answers side by side.",
+      "benefit": "Four rules in this harness decide something semantic with a pattern: which lessons fit a gate failure, whether a reply claims the work is done, whether a flagged comment only narrates the code, and whether a gate failure is the same problem as the last one. Each can be given a second reading from TypeSafe's Jev, written to the record beside what the rule decided \u2014 so whether the model would do better is a measurement taken on your own work instead of a guess. Only lesson ranking can be set to `apply`, because a lesson ranked badly costs one less useful paragraph and nothing else; pinned lessons are never reordered.",
+      "tradeOff": "Each use sends something different to a third-party service hosted in the United States, which is why each is its own switch and all four ship off: lesson ranking sends the gate's output tail and your lessons, ship-claim sends the end of the agent's reply, comment narration sends the comments the rule flagged, and stagnation sends two gate output tails and keeps the previous one on disk while it is on. Secrets are always redacted first and the record keeps ids and probabilities, never the text. It costs a request per item and up to `timeoutMs` of latency on the hook that asks \u2014 `stop` for lessons and stagnation, the reply hook for ship-claim, the edit hook for comments. In `record` it changes no decision at all, so it costs money and tells you something only if you read the record. None of the four questions has been measured. Needs a key in TYPESAFE_API_KEY or the machine home's credentials.json; doctor names it when enabled and inert.",
+      "defaultOn": false,
+      "sinceCatalogVersion": 16,
+      "fires": [
+        "stop",
+        "response.after",
+        "tool.after"
+      ],
+      "verdict": "record",
+      "inspect": "tlc harness obs report \u2014 runs and failures by use; grep '\"rail\":\"jev-advisor\"' in obs.jsonl for each reading beside the rule's own answer; tlc harness doctor reports it when enabled and inert",
+      "asks": [
+        "lessonRank: off | record | apply",
+        "shipClaim: off | record",
+        "commentNarration: off | record",
+        "stagnation: off | record",
         "timeoutMs"
       ],
       "recommend": "off"

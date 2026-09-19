@@ -41,6 +41,11 @@ export type UntrustedJudgeConfig = {
   concurrency: number;
   maxEntryChars: number;
   maxOperatorPromptChars: number;
+  /**
+   * Which kinds of action are judged. `shell` is the rail as it shipped; the others are each their own opt-in,
+   * because each sends something new off the machine — file contents, tool arguments, the agent's own reply.
+   */
+  scope: { command: boolean; edit: boolean; mcp: boolean; response: boolean };
   /** invariant: pinned. `jev-latest` moves without notice, and every threshold is tuned against one version. */
   model: string;
 };
@@ -73,11 +78,64 @@ export const DEFAULT_UNTRUSTED_JUDGE: UntrustedJudgeConfig = {
   concurrency: 8,
   maxEntryChars: 8000,
   maxOperatorPromptChars: 4000,
+  scope: { command: true, edit: false, mcp: false, response: false },
   model: "jev-1.13.0",
 };
 
 const PROBABILITY_FIELDS = ["contentInstructsAgent", "commandFollowsContent"] as const;
 const POSITIVE_FIELDS = ["timeoutMs", "concurrency", "maxEntryChars", "maxOperatorPromptChars"] as const;
+
+const SCOPE_FIELDS = ["command", "edit", "mcp", "response"] as const;
+
+function scopeErrors(scope: Partial<UntrustedJudgeConfig["scope"]> | undefined): string[] {
+  if (scope === undefined) {
+    return [];
+  }
+  if (scope === null || typeof scope !== "object") {
+    return [`untrustedContent.judge.scope must be an object, got ${JSON.stringify(scope)}`];
+  }
+  return SCOPE_FIELDS.filter((field) => scope[field] !== undefined && typeof scope[field] !== "boolean").map(
+    (field) =>
+      `untrustedContent.judge.scope.${field} must be true or false, got ${JSON.stringify(scope[field])}`,
+  );
+}
+
+function thresholdErrors(thresholds: Partial<UntrustedJudgeConfig["thresholds"]> | undefined): string[] {
+  const errors: string[] = [];
+  for (const field of PROBABILITY_FIELDS) {
+    const value = thresholds?.[field];
+    if (value === undefined) {
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+      errors.push(
+        `untrustedContent.judge.thresholds.${field} must be a number between 0 and 1, got ${JSON.stringify(value)}`,
+      );
+    }
+  }
+  return errors;
+}
+
+// hazard: `concurrency` sizes an array, and a fraction there throws on every command rather than once at load.
+function concurrencyError(value: unknown): string[] {
+  if (typeof value !== "number" || value <= 0 || Number.isInteger(value)) {
+    return [];
+  }
+  return [`untrustedContent.judge.concurrency must be a whole number, got ${JSON.stringify(value)}`];
+}
+
+// invariant: pinned. A `-latest` alias moves without notice, and every threshold is tuned against one version.
+function modelError(value: unknown): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (typeof value === "string" && value.trim() !== "" && !value.endsWith("-latest")) {
+    return [];
+  }
+  return [
+    `untrustedContent.judge.model must name a pinned version such as ${DEFAULT_UNTRUSTED_JUDGE.model}, got ${JSON.stringify(value)}`,
+  ];
+}
 
 /**
  * The judge fields whose value cannot be read as anything, named one by one.
@@ -92,18 +150,7 @@ export function judgeConfigErrors(judge: Partial<UntrustedJudgeConfig> | undefin
   if (judge === undefined || judge === null) {
     return [];
   }
-  const errors: string[] = [];
-  for (const field of PROBABILITY_FIELDS) {
-    const value = judge.thresholds?.[field];
-    if (value === undefined) {
-      continue;
-    }
-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
-      errors.push(
-        `untrustedContent.judge.thresholds.${field} must be a number between 0 and 1, got ${JSON.stringify(value)}`,
-      );
-    }
-  }
+  const errors: string[] = thresholdErrors(judge.thresholds);
   for (const field of POSITIVE_FIELDS) {
     const value = judge[field];
     if (value === undefined) {
@@ -113,6 +160,11 @@ export function judgeConfigErrors(judge: Partial<UntrustedJudgeConfig> | undefin
       errors.push(`untrustedContent.judge.${field} must be a positive number, got ${JSON.stringify(value)}`);
     }
   }
+  errors.push(
+    ...concurrencyError(judge.concurrency),
+    ...modelError(judge.model),
+    ...scopeErrors(judge.scope),
+  );
   if (judge.mode !== undefined && judge.mode !== "record" && judge.mode !== "ask") {
     errors.push(`untrustedContent.judge.mode must be record or ask, got ${JSON.stringify(judge.mode)}`);
   }

@@ -6,6 +6,7 @@
 export type CommentMode = "declared" | "strict" | "resolvable";
 
 import type { EffortLevel } from "../../contracts/effort.ts";
+import type { JevAdvisorConfig } from "../advisor/advisor.types.ts";
 import type { AppendFilesMode } from "../gate/gate.types.ts";
 import type { LessonsSyncMode } from "../lesson/lesson.sync.ts";
 import type { UntrustedJudgeConfig, UntrustedMode } from "../untrusted/untrusted.types.ts";
@@ -141,6 +142,8 @@ export type Policy = {
     budgetContinue: boolean;
     budgetContinueAfterLoops: number;
     lessons: LessonsPolicyConfig;
+    /** Jev asked about the harness's own judgement calls, beside the rule that already makes each of them. */
+    jev: JevAdvisorConfig;
   };
   mcpPrime: string[];
   bootstrapExtra: string[];
@@ -156,6 +159,7 @@ export type PartialPolicy = Partial<Policy> & {
   untrustedContent?: Partial<Policy["untrustedContent"]> & {
     judge?: Partial<UntrustedJudgeConfig> & {
       thresholds?: Partial<UntrustedJudgeConfig["thresholds"]>;
+      scope?: Partial<UntrustedJudgeConfig["scope"]>;
     };
   };
   planGate?: Partial<Policy["planGate"]>;
@@ -164,6 +168,7 @@ export type PartialPolicy = Partial<Policy> & {
   secrets?: Partial<Policy["secrets"]>;
   intelligence?: Partial<Policy["intelligence"]> & {
     lessons?: Partial<LessonsPolicyConfig>;
+    jev?: Partial<JevAdvisorConfig>;
   };
 };
 

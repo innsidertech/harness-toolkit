@@ -8,6 +8,7 @@ import { decayedConfidence } from "../lesson.score.ts";
 import {
   omitLessonsNote,
   packLessonsUnderBudget,
+  rankedEligible,
   rankLessonsForSync,
   renderLessonBlock,
   selectLessons,
@@ -277,6 +278,42 @@ test("selecting a lesson twice does not raise its own rank", async () => {
       second.lessons.map((l) => l.id),
       first.lessons.map((l) => l.id),
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a rerank reorders the scored lessons, leaves pinned ones first, and leaves unscored ones below in their rank", async () => {
+  const root = tempRoot();
+  try {
+    const pinned = lesson({ id: "pinned", priority: 10, pinned: true, instruction: "pinned rule" });
+    const high = lesson({ id: "high", priority: 90, instruction: "ranked first by the selector" });
+    const mid = lesson({ id: "mid", priority: 60, instruction: "ranked second by the selector" });
+    const low = lesson({ id: "low", priority: 30, instruction: "ranked third by the selector" });
+    const unscored = lesson({ id: "unscored", priority: 20, instruction: "the advisor was not asked" });
+    await writeProjectLessons(root, [low, pinned, mid, unscored, high]);
+    const config = { ...DEFAULT_LESSONS_POLICY, enabled: true, maxInjectRetry: 10, maxCharsRetry: 100_000 };
+    const base = { projectDir: root, config, mode: "retry" as const, gate: "test", text: "test failed" };
+    // why: filtered, because the shipped seed lessons are eligible too, and this is about the order of the ones written here.
+    const own = (ids: string[]): string[] => ids.filter((id) => !id.startsWith("core:"));
+
+    assert.deepEqual(own(rankedEligible(base).map((row) => row.lesson.id)), [
+      "pinned",
+      "high",
+      "mid",
+      "low",
+      "unscored",
+    ]);
+    const reranked = { ...base, rerank: { high: 0.1, mid: 0.2, low: 0.9 } };
+    assert.deepEqual(own(rankedEligible(reranked).map((row) => row.lesson.id)), [
+      "pinned",
+      "low",
+      "mid",
+      "high",
+      "unscored",
+    ]);
+    const selection = await selectLessons(reranked);
+    assert.deepEqual(own(selection.usedIds).slice(0, 4), ["pinned", "low", "mid", "high"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

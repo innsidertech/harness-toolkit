@@ -10,6 +10,7 @@ doctor reports against your own configuration.
 
 - **AD-146** — the untrusted-content judge asks about rewritten commands, over the network, and only ever asks
 - **AD-147** — Claude Code's adapter dropped tool output for shell and MCP events, so enforce mode remembered nothing
+- **AD-148** — Jev is asked about four of the harness's own judgement calls, beside the rule that already makes each, and changes none of them
 
 ## v0.16.2
 

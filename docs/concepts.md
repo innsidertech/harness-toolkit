@@ -510,11 +510,16 @@ abstains rather than rendering into a field the provider ignores.
 
 `untrustedContent.judge.enabled` (off by default), and the only check in this harness that leaves the machine.
 The verbatim rail above misses a command the agent reworded, which is the ordinary case because agents
-paraphrase by default. The judge closes that gap by asking a model instead of a string comparison: on
-`shell.before`, after the floor and after the verbatim check, one request per remembered entry to TypeSafe's
-Jev, asking whether that content tries to control an agent and whether the proposed command does what it asked
-for. Above both thresholds the operator is asked, with the source named and never the text
-([/decisions/ad-146.md](/decisions/ad-146.md)).
+paraphrase by default. The judge closes that gap by asking a model instead of a string comparison, in two
+places. When an untrusted read is remembered, TypeSafe's Jev is asked once whether that content tries to control
+an agent, and the score is kept with the entry — content that does not is never asked about again, so a session
+that read only ordinary pages pays nothing per command. Then on `shell.before`, after every cheaper check, each
+entry that did is asked about the command: does it do what the content asked for. Above both thresholds the
+operator is asked, with the source named and never the text ([/decisions/ad-146.md](/decisions/ad-146.md)).
+
+`untrustedContent.judge.scope` extends the same judgement to `edit`, `mcp` and `response`, each off by default
+because each sends something new off the machine — file contents, tool arguments, the agent's own reply. A reply
+has already reached the operator when it is judged, so it is recorded and never asked about.
 
 It only ever asks. The vendor states that this class of filter is not a security boundary, and the model is
 documented not to treat its state as hostile — so content that argues for its own classification can move the
@@ -532,7 +537,27 @@ real readings.
 The costs are stated in full in the capability catalog, because the consent is not "turn on a rail" — it is
 "send the text of issues, pages and your own prompts to a third party in the United States". Secrets are
 redacted first, the key comes from `TYPESAFE_API_KEY` or a credentials file under the machine home and never
-from project config, and the local record carries sources, probabilities and metrics only.
+from project config, and the local record carries sources, probabilities, metrics and the agent's own command
+— masked, and cut the way the ask shows it — so a reading can be matched to what it was about.
+
+## jev advisors
+
+`intelligence.jev.enabled` (off by default), with four uses that are each `off` by default. Four rules in this
+harness decide something semantic with a pattern: which lessons fit a gate failure, whether a reply claims the
+work is done, whether a flagged comment only narrates the code, and whether a gate failure is the same problem
+as the last one. Each use asks TypeSafe's Jev that same question and writes the reading beside what the rule
+decided, as `policy.observe` under `"rail":"jev-advisor"` ([/decisions/ad-148.md](/decisions/ad-148.md)).
+
+In `record` nothing changes: the rule still decides, and the record is the comparison. That is the point —
+none of these questions has been measured, and a number nobody has compared with the rule it would replace is
+not a reason to replace it. Only `intelligence.jev.lessonRank` accepts `apply`, because a lesson ranked badly
+costs one less useful paragraph and nothing else; scored lessons are ordered by their reading, and pinned
+lessons are never reordered.
+
+Each use sends something different to a third party — the gate's output tail and your lessons, the end of the
+agent's reply, the comments the rule flagged, two gate output tails — which is why each is its own switch.
+Secrets are redacted first, unconditionally, and the record keeps ids and probabilities, never the text.
+`doctor` names the block when it is enabled and inert.
 
 ## global observability spool
 

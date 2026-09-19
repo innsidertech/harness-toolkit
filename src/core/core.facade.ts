@@ -1,3 +1,5 @@
+import { ADVISOR_RAIL, advise, advisorObsAttrs } from "./advisor/advisor.service.ts";
+import { readPreviousFailure, rememberFailure } from "./advisor/advisor.store.ts";
 import {
   appendAttestation,
   attestationPath,
@@ -77,6 +79,7 @@ import {
   appliesHere,
   isInjectable,
   previewLessonSelection,
+  rankedEligible,
   renderLessonBlock,
   selectLessons as selectLessonsInner,
 } from "./lesson/lesson.select.ts";
@@ -141,6 +144,7 @@ import {
 import {
   isUnderCodePaths,
   loadPolicy,
+  resolveAdvisorConfigErrors,
   resolvedWithoutProjectTier,
   resolveJudgeConfigErrors,
   resolveProjectPosture,
@@ -243,10 +247,13 @@ import {
 } from "./turn/turn.loop-counter.ts";
 import {
   credentialsPath,
+  judgeAction,
   judgeGenAi,
   judgeObsAttrs,
   judgeShellCommand,
   resolveApiKey,
+  screenObsAttrs,
+  screenUntrustedRead,
 } from "./untrusted/untrusted.judge.ts";
 import {
   clearOperatorPrompt,
@@ -366,6 +373,7 @@ export const coreFacade = {
     linkHealthMessage,
     skillLinks,
   },
+  advisor: { advise, advisorObsAttrs, ADVISOR_RAIL, readPreviousFailure, rememberFailure },
   lesson: {
     projectLessonsInjectable,
     recordLessonFromFailure,
@@ -373,6 +381,7 @@ export const coreFacade = {
     authoredLessonId,
     selectLessons,
     previewLessonSelection,
+    rankedEligible,
     touchAccessed,
     upsertProjectLesson,
     upsertLesson,
@@ -439,8 +448,11 @@ export const coreFacade = {
     readOperatorPrompt,
     clearOperatorPrompt,
     judgeShellCommand,
+    judgeAction,
     judgeObsAttrs,
     judgeGenAi,
+    screenUntrustedRead,
+    screenObsAttrs,
     resolveApiKey,
     credentialsPath,
   },
@@ -472,6 +484,7 @@ export const coreFacade = {
     unknownKeys,
     typeMismatches,
     resolveJudgeConfigErrors,
+    resolveAdvisorConfigErrors,
     resolveProjectPosture,
     resolveProjectSyncMode,
     OPERATOR_MODES,

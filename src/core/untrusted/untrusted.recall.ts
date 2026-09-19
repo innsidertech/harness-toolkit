@@ -11,7 +11,19 @@ export const RECALL_BUDGET_CHARS = 64_000;
 /** why: below this a "command" is a word, and a word appearing in a page proves nothing. */
 export const MIN_COMMAND_CHARS = 12;
 
-export type RecallEntry = { source: string; text: string };
+/**
+ * What the judge learned about an entry when it was read, one score per chunk.
+ *
+ * why kept with the entry: whether content addresses an agent does not depend on the command that comes later —
+ * measured at 0.96–0.97 across six different commands against one page — so asking once at the read spares every
+ * later command the same question ([/decisions/ad-146.md](/decisions/ad-146.md)).
+ *
+ * invariant: valid only for the model and chunk size it was taken with. A changed pin or cap makes it unread
+ * rather than wrong.
+ */
+export type RecallScreen = { model: string; maxEntryChars: number; instructs: number[] };
+
+export type RecallEntry = { source: string; text: string; screen?: RecallScreen };
 
 export type Recall = {
   entries: RecallEntry[];

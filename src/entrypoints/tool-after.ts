@@ -4,6 +4,7 @@ import { coreFacade, type ObsKind } from "../core/index.ts";
 import { estimateCostUsd, mapPoolToNeutral } from "../platform/pricing.ts";
 import { normalizeSeparators } from "../platform/sanitize.ts";
 import { readClaudeUsage } from "../providers/index.ts";
+import { adviseAndRecord } from "./advisory.ts";
 import type { Handler, HandlerContext } from "./run.ts";
 import { main } from "./run.ts";
 import { OBS_CONFIG_AUDIT, obsConfigFor, observeForRules, resolveTurnBase } from "./support.ts";
@@ -55,6 +56,9 @@ function usageGenAi(event: HarnessEvent, ctx: HandlerContext): Record<string, un
  * to run per edit — unlike duplication, which reads the whole tracked tree and stays stop-only
  * ([/decisions/ad-111.md](/decisions/ad-111.md)). It never blocks; a real violation still blocks at stop.
  */
+/** why a cap: one edit can add dozens of comments, and the advisory budget is one hook's, not one per comment. */
+const COMMENT_ADVISORY_LIMIT = 6;
+
 async function commentEditAdvisory(event: HarnessEvent, ctx: HandlerContext): Promise<Decision | null> {
   const { policy } = ctx;
   if (!policy.comments.enabled || policy.comments.onViolation !== "followup" || !event.filePath) {
@@ -78,7 +82,49 @@ async function commentEditAdvisory(event: HarnessEvent, ctx: HandlerContext): Pr
   if (hits.length === 0) {
     return null;
   }
+  // invariant: record only, and only about comments the rule already flagged — the reading says how often the
+  // model agrees that a flagged comment narrates, which is the rule's false-positive rate seen from outside.
+  await adviseAndRecord({
+    root: event.projectDir,
+    provider: event.provider,
+    sessionKey: event.sessionKey,
+    policy,
+    use: "commentNarration",
+    items: hits.slice(0, COMMENT_ADVISORY_LIMIT).map((hit) => ({
+      id: `${hit.file}:${hit.line}`,
+      state: { comment: hit.text },
+    })),
+    existing: { rule_flagged: hits.length, comments_mode: policy.comments.mode },
+  });
   return { kind: "context", text: coreFacade.commentPolicy.commentEditAdvisory(hits, policy.comments.mode) };
+}
+
+/**
+ * why at the read: whether content addresses an agent is a fact about the content, so it is asked once here rather
+ * than by every command of the turn. With the judge off this makes no read, no request and no record
+ * ([/decisions/ad-146.md](/decisions/ad-146.md)).
+ */
+async function screenRememberedRead(event: HarnessEvent, ctx: HandlerContext): Promise<void> {
+  const judge = ctx.policy.untrustedContent.judge;
+  const outcome = await coreFacade.untrusted.screenUntrustedRead({
+    root: event.projectDir,
+    sessionKey: event.sessionKey,
+    config: ctx.policy.untrustedContent,
+  });
+  if (outcome.outcome === "skipped") {
+    return;
+  }
+  coreFacade.observability.recordObs(event.projectDir, obsConfigFor(ctx.policy), {
+    provider: event.provider,
+    kind: "policy.observe",
+    sessionKey: event.sessionKey,
+    model: outcome.model === "none" ? judge.model : outcome.model,
+    attrs: coreFacade.untrusted.screenObsAttrs(outcome, judge),
+    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, inputTokens) => {
+      const cost = estimateCostUsd("typesafe", model, { inputTokens });
+      return { costUsd: cost.costUsd, source: cost.source };
+    }),
+  });
 }
 
 export const toolAfterHandler: Handler = async (event: HarnessEvent, ctx: HandlerContext) => {
@@ -121,7 +167,7 @@ export const toolAfterHandler: Handler = async (event: HarnessEvent, ctx: Handle
   // why: recorded before the framing is decided, because the framing fires once per turn and the content of every
   // untrusted read still has to be remembered ([/decisions/ad-077.md](/decisions/ad-077.md)).
   if (ctx.provider.capabilities().toolOutputAtAfter) {
-    coreFacade.untrusted.rememberUntrustedOutput({
+    const remembered = coreFacade.untrusted.rememberUntrustedOutput({
       root: event.projectDir,
       sessionKey: event.sessionKey,
       event: event.event,
@@ -131,6 +177,9 @@ export const toolAfterHandler: Handler = async (event: HarnessEvent, ctx: Handle
       config: ctx.policy.untrustedContent,
       providerTools: ctx.provider.policyDefaults().untrustedTools,
     });
+    if (remembered) {
+      await screenRememberedRead(event, ctx);
+    }
   }
 
   if (ctx.policy.secrets.redactOutput && event.toolOutput) {

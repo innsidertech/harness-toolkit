@@ -191,7 +191,7 @@ function gateTimeSection(rollup: SessionRollup): string {
  */
 export function judgeSection(rollup: SessionRollup): string {
   const judge = rollup.judge;
-  if (judge === undefined || judge.runs === 0) {
+  if (judge === undefined || judge.runs + (judge.screens ?? 0) === 0) {
     return "";
   }
   const failures = Object.entries(judge.failures).sort((a, b) => b[1] - a[1]);
@@ -207,7 +207,9 @@ export function judgeSection(rollup: SessionRollup): string {
     "| Metric | Value |",
     "|--------|-------|",
     `| Runs | ${judge.runs} |`,
+    `| Read-time screens | ${judge.screens ?? 0} |`,
     `| Asked | ${judge.asks} |`,
+    `| Cleared both thresholds | ${judge.cleared ?? 0} |`,
     `| Ran and asked nobody | ${judge.quiet} |`,
     `| Failed | ${failed} |`,
     ...failures.map(([category, count]) => `| ↳ ${category} | ${count} |`),
@@ -290,7 +292,7 @@ ${JSON.stringify(rollup.mcp, null, 2)}
 \`\`\`
 ${gateTimeSection(rollup)}
 ${railActivity(rollup, activeRules)}
-${judgeSection(rollup)}
+${judgeSection(rollup)}${advisorSection(rollup)}
 ${costLines(rollup).join("\n")}
 `;
 }
@@ -301,10 +303,46 @@ ${costLines(rollup).join("\n")}
 /** The tools whose successes are recorded as shell events, so the tools table can never count them. */
 export const SHELL_TOOLS = new Set(["Bash", "run_terminal_cmd", "terminal"]);
 
+/** Silent until an advisor has run, for the reason the judge's section is ([/decisions/ad-034.md](/decisions/ad-034.md)). */
+function advisorSection(rollup: SessionRollup): string {
+  const rows = Object.entries(rollup.advisor ?? {});
+  if (rows.length === 0) {
+    return "";
+  }
+  return [
+    "",
+    "## Jev advisors",
+    "",
+    "| Use | Runs | Failed |",
+    "|-----|------|--------|",
+    ...rows.map(([use, row]) => `| ${use} | ${row.runs} | ${row.failed} |`),
+    "",
+    "Each run is a reading written beside what the existing rule decided. The comparison is in `obs.jsonl`, under",
+    '`"rail":"jev-advisor"`.',
+  ].join("\n");
+}
+
+function advisorScreenSections(rollup: SessionRollup): Array<{ title: string; rows: Row[] }> {
+  const rows = Object.entries(rollup.advisor ?? {});
+  if (rows.length === 0) {
+    return [];
+  }
+  return [
+    {
+      title: "Jev advisors",
+      rows: rows.map(([use, row]) => ({
+        label: use,
+        value: `${row.runs} runs, ${row.failed} failed`,
+        level: row.failed > 0 ? ("warn" as const) : ("ok" as const),
+      })),
+    },
+  ];
+}
+
 /** invariant: the same numbers as the markdown section, or the two surfaces would answer differently. */
 function judgeScreenSections(rollup: SessionRollup): Array<{ title: string; rows: Row[] }> {
   const judge = rollup.judge;
-  if (judge === undefined || judge.runs === 0) {
+  if (judge === undefined || judge.runs + (judge.screens ?? 0) === 0) {
     return [];
   }
   const failed = Object.values(judge.failures).reduce((total, count) => total + count, 0);
@@ -312,7 +350,11 @@ function judgeScreenSections(rollup: SessionRollup): Array<{ title: string; rows
     {
       title: "Untrusted-content judge",
       rows: [
-        { label: "runs", value: `${judge.runs} (${judge.asks} asked, ${judge.quiet} quiet)` },
+        {
+          label: "runs",
+          value: `${judge.runs} (${judge.asks} asked, ${judge.cleared ?? 0} cleared, ${judge.quiet} quiet)`,
+        },
+        { label: "read-time screens", value: String(judge.screens ?? 0) },
         { label: "failed", value: String(failed), level: failed > 0 ? ("warn" as const) : ("ok" as const) },
         {
           label: "latency total/worst ms",
@@ -402,6 +444,7 @@ export function sessionReportScreen(rollup: SessionRollup): Screen {
       },
       ...(ruleRows.length > 0 ? [{ title: "Interruptions by rule", rows: ruleRows }] : []),
       ...judgeScreenSections(rollup),
+      ...advisorScreenSections(rollup),
       ...(toolRows.length > 0 ? [{ title: "Tools", rows: toolRows }] : []),
       ...(Object.keys(rollup.models).length > 0
         ? [{ title: "Models", lines: [top(rollup.models).join("  ·  ")] }]

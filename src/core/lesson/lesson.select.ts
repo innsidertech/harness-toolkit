@@ -146,29 +146,25 @@ export type LessonSelectionArgs = {
   gate?: string;
   text?: string;
   now?: Date;
+  /**
+   * Lesson id to relevance, from the Jev advisor in `apply`. Scored lessons are ordered by it and the rest keep
+   * their rank below them; pinned lessons are untouched, because an operator's order is not the model's to change.
+   */
+  rerank?: Record<string, number>;
 };
 
 export type LessonSelection = { lessons: HarnessLesson[]; usedIds: string[]; omitted: number };
 
 /**
- * The selection with no side effect, so a reader can ask what would be injected without becoming an injection.
- *
- * why this is separate: `selectLessons` marks the picked lessons as accessed, which is correct at an injection and
- * wrong anywhere else. `doctor` needs the same answer and must not move the accessed timestamps — a measurement
- * that changes what it measures is not a measurement ([/decisions/ad-027.md](/decisions/ad-027.md)).
- *
- * invariant: one selector. Re-deriving the budget arithmetic for the reporting path would be a second answer that
- * drifts from the first ([/decisions/ad-100.md](/decisions/ad-100.md)).
+ * why: exported because the advisor asks about the head of this list — every lesson that could be injected
+ * here, in the selector's own order — and it has to be the same list the selector packs. A second ranking for
+ * the question would be a second answer ([/decisions/ad-100.md](/decisions/ad-100.md)).
  */
-export function previewLessonSelection(args: LessonSelectionArgs): LessonSelection {
+export function rankedEligible(args: LessonSelectionArgs): Array<{ lesson: HarnessLesson; score: number }> {
   if (!args.config.enabled) {
-    return { lessons: [], usedIds: [], omitted: 0 };
+    return [];
   }
-
-  const maxCount = args.mode === "session" ? args.config.maxInjectSession : args.config.maxInjectRetry;
-  const maxChars = args.mode === "session" ? args.config.maxCharsSession : args.config.maxCharsRetry;
   const now = args.now ?? new Date();
-
   const ranked = allLessons(args.projectDir)
     .filter(
       (lesson) =>
@@ -195,7 +191,36 @@ export function previewLessonSelection(args: LessonSelectionArgs): LessonSelecti
     ...ranked.filter((row) => row.lesson.pinned),
     ...ranked.filter((row) => !row.lesson.pinned),
   ];
+  const rerank = args.rerank;
+  if (rerank === undefined) {
+    return ordered;
+  }
+  const pinned = ordered.filter((row) => row.lesson.pinned);
+  const scored = ordered
+    .filter((row) => !row.lesson.pinned && rerank[row.lesson.id] !== undefined)
+    .sort((a, b) => (rerank[b.lesson.id] as number) - (rerank[a.lesson.id] as number));
+  const rest = ordered.filter((row) => !row.lesson.pinned && rerank[row.lesson.id] === undefined);
+  return [...pinned, ...scored, ...rest];
+}
 
+/**
+ * The selection with no side effect, so a reader can ask what would be injected without becoming an injection.
+ *
+ * why this is separate: `selectLessons` marks the picked lessons as accessed, which is correct at an injection and
+ * wrong anywhere else. `doctor` needs the same answer and must not move the accessed timestamps — a measurement
+ * that changes what it measures is not a measurement ([/decisions/ad-027.md](/decisions/ad-027.md)).
+ *
+ * invariant: one selector. Re-deriving the budget arithmetic for the reporting path would be a second answer that
+ * drifts from the first ([/decisions/ad-100.md](/decisions/ad-100.md)).
+ */
+export function previewLessonSelection(args: LessonSelectionArgs): LessonSelection {
+  if (!args.config.enabled) {
+    return { lessons: [], usedIds: [], omitted: 0 };
+  }
+
+  const maxCount = args.mode === "session" ? args.config.maxInjectSession : args.config.maxInjectRetry;
+  const maxChars = args.mode === "session" ? args.config.maxCharsSession : args.config.maxCharsRetry;
+  const ordered = rankedEligible(args);
   const picked: HarnessLesson[] = [];
   let chars = 0;
   for (const row of ordered) {

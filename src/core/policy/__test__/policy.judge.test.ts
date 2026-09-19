@@ -90,6 +90,14 @@ const REJECTED: Array<[string, Record<string, unknown>, string]> = [
   ],
   ["a zero timeoutMs", { enabled: true, timeoutMs: 0 }, "untrustedContent.judge.timeoutMs"],
   ["a negative concurrency", { enabled: true, concurrency: -1 }, "untrustedContent.judge.concurrency"],
+  ["a fractional concurrency", { enabled: true, concurrency: 2.5 }, "untrustedContent.judge.concurrency"],
+  ["a model alias that moves", { enabled: true, model: "jev-latest" }, "untrustedContent.judge.model"],
+  ["an empty model", { enabled: true, model: " " }, "untrustedContent.judge.model"],
+  [
+    "a scope flag that is not a boolean",
+    { enabled: true, scope: { edit: "yes" } },
+    "untrustedContent.judge.scope.edit",
+  ],
   ["a zero maxEntryChars", { enabled: true, maxEntryChars: 0 }, "untrustedContent.judge.maxEntryChars"],
   [
     "a maxOperatorPromptChars that is not a number",

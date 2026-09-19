@@ -110,6 +110,35 @@ const EMPTY_JUDGE: JudgeRollup = {
   costSource: "none",
 };
 
+function countAdvisorRun(rollup: SessionRollup, event: ObsEvent): void {
+  const use = String(event.attrs.use ?? "unknown");
+  const advisor = rollup.advisor ?? {};
+  const row = advisor[use] ?? { runs: 0, failed: 0 };
+  row.runs += 1;
+  if (String(event.attrs.outcome ?? "").startsWith("error:")) {
+    row.failed += 1;
+  }
+  advisor[use] = row;
+  rollup.advisor = advisor;
+}
+
+function countJudgeOutcome(judge: JudgeRollup, outcome: string, event: ObsEvent): void {
+  const isScreen = event.attrs.phase === "read";
+  if (isScreen) {
+    judge.screens = (judge.screens ?? 0) + 1;
+  } else {
+    judge.runs += 1;
+  }
+  if (outcome.startsWith("error:")) {
+    const category = String(event.attrs.category ?? "unknown");
+    judge.failures[category] = (judge.failures[category] ?? 0) + 1;
+  } else if (outcome === "ask") {
+    judge.asks += 1;
+  } else if (!isScreen) {
+    judge.quiet += 1;
+  }
+}
+
 /**
  * invariant: one run is one counted run whatever it produced. The interesting number for calibration is the ratio
  * between what was paid for and what was asked, and it only exists if the quiet runs are counted too.
@@ -118,15 +147,12 @@ function countJudgeRun(rollup: SessionRollup, event: ObsEvent): void {
   // hazard: a rollup written before this field existed has none, and incrementing into `undefined` would throw on
   // the path that must never break a turn.
   const judge = rollup.judge ?? { ...EMPTY_JUDGE, failures: {} };
-  judge.runs += 1;
   const outcome = String(event.attrs.outcome ?? "");
-  if (outcome === "ask") {
-    judge.asks += 1;
-  } else if (outcome.startsWith("error:")) {
-    const category = String(event.attrs.category ?? "unknown");
-    judge.failures[category] = (judge.failures[category] ?? 0) + 1;
-  } else {
-    judge.quiet += 1;
+  // invariant: a screen is counted apart from a run, and a screen that worked is neither an ask nor a quiet run.
+  // Its failures, cost and latency are the judge's all the same, so they land in the shared totals below.
+  countJudgeOutcome(judge, outcome, event);
+  if (event.attrs.cleared === true) {
+    judge.cleared = (judge.cleared ?? 0) + 1;
   }
   if (event.attrs.drift === true) {
     judge.drift += 1;
@@ -219,6 +245,9 @@ function updateRollup(root: string, config: ObservabilityConfig, event: ObsEvent
   }
   if (event.kind === "policy.observe" && event.attrs.rail === "untrusted-judge") {
     countJudgeRun(rollup, event);
+  }
+  if (event.kind === "policy.observe" && event.attrs.rail === "jev-advisor") {
+    countAdvisorRun(rollup, event);
   }
   if (event.kind === "session.start" && typeof event.attrs.injected_chars === "number") {
     rollup.injected_chars = event.attrs.injected_chars;

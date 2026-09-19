@@ -176,6 +176,17 @@ async function readBody(response: Response, ids: readonly string[]): Promise<Rea
   };
 }
 
+async function readResponse(
+  response: Response,
+  ids: readonly string[],
+): Promise<Reading | "retry" | Failure> {
+  const verdict = verdictForStatus(response.status);
+  if (verdict.kind === "failed") {
+    return { category: verdict.category, detail: verdict.detail };
+  }
+  return verdict.kind === "retry" ? "retry" : readBody(response, ids);
+}
+
 /**
  * Ask one System One request and return a discriminated result.
  *
@@ -207,16 +218,26 @@ export async function askSystemOne(
     latencyMs: now() - started,
   });
 
-  async function send(remaining: number): Promise<Response | Failure> {
+  /**
+   * hazard: `fetch` resolves on the headers, so a timer cleared there leaves the body read with no deadline at
+   * all. The body is read inside the same abort scope, which is what makes the budget cover the whole attempt.
+   */
+  async function send(remaining: number): Promise<Reading | "retry" | Failure> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), remaining);
     try {
-      return await fetchImpl(SYSTEMONE_ENDPOINT, {
+      const response = await fetchImpl(SYSTEMONE_ENDPOINT, {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
         body,
         signal: controller.signal,
       });
+      const outcome = await readResponse(response, ids);
+      // why: an aborted body read surfaces from `json()` as a parse failure, which would misfile a timeout.
+      if (typeof outcome === "object" && "category" in outcome && controller.signal.aborted) {
+        return { category: "timeout", detail: `aborted after ${timeoutMs} ms` };
+      }
+      return outcome;
     } catch (error) {
       if (isAbort(error) || now() >= deadline) {
         return { category: "timeout", detail: `aborted after ${timeoutMs} ms` };
@@ -234,15 +255,7 @@ export async function askSystemOne(
     }
 
     const sent = await send(remaining);
-    if (!(sent instanceof Response)) {
-      return failed(sent);
-    }
-
-    const verdict = verdictForStatus(sent.status);
-    if (verdict.kind === "failed") {
-      return failed(verdict);
-    }
-    if (verdict.kind === "retry") {
+    if (sent === "retry") {
       // why: the wait is capped by what is left of the budget, so a backoff cannot outlive the request it serves.
       const wait = Math.min(
         nextDelay({ attempt, baseMs: 50, capMs: 2000, random }),
@@ -252,10 +265,9 @@ export async function askSystemOne(
       continue;
     }
 
-    const reading = await readBody(sent, ids);
-    if ("category" in reading) {
-      return failed(reading);
+    if ("category" in sent) {
+      return failed(sent);
     }
-    return { ok: true, ...reading, latencyMs: now() - started };
+    return { ok: true, ...sent, latencyMs: now() - started };
   }
 }

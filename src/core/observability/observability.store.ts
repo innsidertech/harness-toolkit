@@ -67,6 +67,12 @@ export type SessionRollup = {
    * for a capability nobody opted into is the noise [/decisions/ad-034.md](/decisions/ad-034.md) names.
    */
   judge?: JudgeRollup;
+  /**
+   * The Jev advisors' calls, by use. Optional for the judge's reason: a session that never asked gains no row.
+   * Their cost and tokens are in the session's own totals; what only this can say is how often each use ran and
+   * how often it came back with nothing.
+   */
+  advisor?: Record<string, { runs: number; failed: number }>;
 };
 
 export type JudgeRollup = {
@@ -74,6 +80,16 @@ export type JudgeRollup = {
   asks: number;
   /** Ran, cost money, interrupted nobody — record mode and below-threshold runs both land here. */
   quiet: number;
+  /**
+   * Runs where an entry cleared both thresholds, whatever the mode then did about it. Optional because a rollup
+   * written before this field existed has none. In `record` mode this is the ask rate nobody lived through.
+   */
+  cleared?: number;
+  /**
+   * Read-time screens: one question per entry, asked once when it was remembered. Counted apart from `runs`
+   * because a screen is about content and a run is about a command, and the ratio calibration needs is over runs.
+   */
+  screens?: number;
   /** Keyed by the client's own error category, so a dead service is distinguishable from a rejected key. */
   failures: Record<string, number>;
   drift: number;

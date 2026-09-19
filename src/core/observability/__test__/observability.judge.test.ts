@@ -18,6 +18,8 @@ type Run = {
   costUsd?: number | null;
   costSource?: string;
   ms?: number;
+  cleared?: boolean;
+  phase?: "read" | "command";
 };
 
 function record(root: string, runs: Run[]): SessionRollup {
@@ -33,6 +35,8 @@ function record(root: string, runs: Run[]): SessionRollup {
         outcome: run.outcome,
         category: run.category ?? "none",
         drift: run.drift === true,
+        cleared: run.cleared === true,
+        phase: run.phase ?? "command",
       },
       gen_ai: {
         input_tokens: run.inputTokens ?? 200,
@@ -82,6 +86,36 @@ test("C29 the report shows runs, asks, failures by category, latency and input t
   assert.match(markdown, /\| ↳ network \| 1 \|/);
   assert.match(markdown, /\| Input tokens \| 1200 \|/);
   assert.match(markdown, /\| Latency total \/ worst ms \| \d+ \/ 2500 \|/);
+});
+
+test("C29 a record-mode run that cleared is counted, so the ask rate exists before anybody is interrupted", () => {
+  const rollup = inRoot((root) =>
+    record(root, [
+      { outcome: "abstain", cleared: true },
+      { outcome: "abstain", cleared: true },
+      { outcome: "abstain" },
+    ]),
+  );
+  assert.equal(rollup.judge?.asks, 0);
+  assert.equal(rollup.judge?.quiet, 3);
+  assert.equal(rollup.judge?.cleared, 2);
+  assert.match(sessionReportMarkdown(rollup, ["untrusted-judge"]), /\| Cleared both thresholds \| 2 \|/);
+});
+
+test("C31 a read-time screen is counted apart from runs, and its failure, latency and tokens still count", () => {
+  const rollup = inRoot((root) =>
+    record(root, [
+      { outcome: "screened", phase: "read" },
+      { outcome: "error:timeout", category: "timeout", phase: "read", ms: 2500 },
+      { outcome: "abstain" },
+    ]),
+  );
+  assert.equal(rollup.judge?.runs, 1);
+  assert.equal(rollup.judge?.screens, 2);
+  assert.equal(rollup.judge?.quiet, 1);
+  assert.deepEqual(rollup.judge?.failures, { timeout: 1 });
+  assert.equal(rollup.judge?.inputTokens, 600);
+  assert.match(sessionReportMarkdown(rollup, ["untrusted-judge"]), /\| Read-time screens \| 2 \|/);
 });
 
 test("C29 asks are attributed by rule, and an enabled judge that never fired is named", () => {
@@ -191,4 +225,28 @@ test("C29 a session that never ran the judge gains no section and no rollup fiel
 test("C29 a rollup from an older build gains the field rather than failing", () => {
   const rollup = inRoot((root) => record(root, [{ outcome: "ask" }]));
   assert.equal(rollup.judge?.runs, 1);
+});
+
+test("C46 advisor runs are counted by use, and the report is silent until one has run", () => {
+  const rollup = inRoot((root) => {
+    for (const [use, outcome] of [
+      ["shipClaim", "advised"],
+      ["shipClaim", "error:timeout"],
+      ["stagnation", "advised"],
+    ] as const) {
+      recordObs(root, CONFIG, {
+        provider: "provider-a",
+        kind: "policy.observe",
+        sessionKey: "s1",
+        model: "jev-1.13.0",
+        attrs: { rail: "jev-advisor", rule: "jev-advisor", use, outcome },
+      });
+    }
+    return getRollup(root, "s1") ?? newRollup("s1", "provider-a");
+  });
+  assert.deepEqual(rollup.advisor, { shipClaim: { runs: 2, failed: 1 }, stagnation: { runs: 1, failed: 0 } });
+  const markdown = sessionReportMarkdown(rollup, []);
+  assert.match(markdown, /## Jev advisors/);
+  assert.match(markdown, /\| shipClaim \| 2 \| 1 \|/);
+  assert.equal(sessionReportMarkdown(newRollup("s2", "provider-a"), []).includes("Jev advisors"), false);
 });

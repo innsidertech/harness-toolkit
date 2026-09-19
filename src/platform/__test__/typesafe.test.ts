@@ -201,6 +201,26 @@ test("C5 an elapsed budget aborts the in-flight request and reads as timeout", a
   assert.equal(result.category, "timeout");
 });
 
+test("C5 a body that stalls after the headers arrived is aborted by the same budget and reads as timeout", async () => {
+  const result = await askSystemOne(REQUEST, {
+    apiKey: "k",
+    timeoutMs: 20,
+    fetchImpl: async (_url, init) =>
+      ({
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(new Error("body read aborted")));
+          }),
+      }) as unknown as Response,
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+  assert.equal(result.category, "timeout");
+});
+
 const UNUSABLE: Array<[string, unknown]> = [
   [
     "a missing answer id",

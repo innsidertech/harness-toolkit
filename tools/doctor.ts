@@ -866,6 +866,57 @@ export function checkJudge(root: string): Check[] {
   return checks;
 }
 
+/**
+ * The Jev advisors, when they are on and cannot work.
+ *
+ * invariant: silent when off, for the judge's reason — a row on every install that never opted in is noise.
+ */
+export function checkAdvisors(root: string): Check[] {
+  const errors = coreFacade.policy.resolveAdvisorConfigErrors(root);
+  if (errors.length > 0) {
+    return [
+      {
+        level: "warn",
+        name: "jev advisors config",
+        detail: `${errors.join("; ")}. The advisors are off until this is fixed in ${projectConfigPath(root)}.`,
+      },
+    ];
+  }
+  const jev = coreFacade.policy.loadPolicy(root).intelligence.jev;
+  if (!jev.enabled) {
+    return [];
+  }
+  const uses = (["lessonRank", "shipClaim", "commentNarration", "stagnation"] as const).filter(
+    (use) => jev[use] !== "off",
+  );
+  if (uses.length === 0) {
+    return [
+      {
+        level: "warn",
+        name: "jev advisors",
+        detail:
+          "enabled and inert: every use is `off`, so nothing is ever asked. Set one of intelligence.jev.lessonRank, shipClaim, commentNarration or stagnation to `record`.",
+      },
+    ];
+  }
+  if (coreFacade.untrusted.resolveApiKey(process.env) === null) {
+    return [
+      {
+        level: "warn",
+        name: "jev advisors key",
+        detail: `enabled and inert: no key in TYPESAFE_API_KEY and none in ${coreFacade.untrusted.credentialsPath(process.env)}.`,
+      },
+    ];
+  }
+  return [
+    {
+      level: "ok",
+      name: "jev advisors",
+      detail: `${uses.map((use) => `${use}: ${jev[use]}`).join(", ")} — model ${jev.model}`,
+    },
+  ];
+}
+
 export function checkProjectPolicy(root: string): Check[] {
   const configPath = projectConfigPath(root);
   const stateDir = projectStateDir(root);
@@ -890,6 +941,7 @@ export function checkProjectPolicy(root: string): Check[] {
     ...checkPolicyDivergence(root),
     ...checkGateScope(root),
     ...checkJudge(root),
+    ...checkAdvisors(root),
   ];
 }
 

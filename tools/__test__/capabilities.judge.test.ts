@@ -25,7 +25,9 @@ test("C30 the catalog carries an untrustedContent.judge entry in the required sh
   }
   assert.equal(entry.defaultOn, false);
   assert.equal(entry.verdict, "ask");
-  assert.deepEqual(entry.fires, ["shell.before"]);
+  // invariant: every event the judge can make a request on — the read-time screen, the command, and the two
+  // `scope` opt-ins that ride `tool.before` and `response.after`.
+  assert.deepEqual(entry.fires, ["tool.after", "shell.before", "tool.before", "response.after"]);
   for (const fires of entry.fires) {
     assert.ok(HARNESS_EVENT_KINDS.includes(fires), fires);
   }
@@ -48,12 +50,12 @@ test("C30 its tradeOff names all four costs", () => {
   assert.match(tradeOff, /latency/i);
 });
 
-test("C30 the entry is the only addition to the catalog version it declares", () => {
+test("C30 the two Jev capabilities are the only additions to the catalog version they declare", () => {
   const { capabilities, catalogVersion } = catalog();
   const added = capabilities.filter((capability) => capability.sinceCatalogVersion === catalogVersion);
   assert.deepEqual(
     added.map((capability) => capability.id),
-    ["untrustedContentJudge"],
+    ["untrustedContentJudge", "jevAdvisors"],
   );
 });
 

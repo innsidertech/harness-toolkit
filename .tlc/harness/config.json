@@ -2,18 +2,53 @@
     "version": 1,
     "projectName": "tlc-agent-harness",
     "mode": "focus",
-    "codePaths": ["src", "tools", "bin"],
+    "codePaths": [
+      "src",
+      "tools",
+      "bin"
+    ],
     "grind": {
       "enabled": true,
       "maxLoops": 3,
-      "lintCommand": ["npx", "biome", "check", "."],
-      "testCommand": ["node", "--test", "--import", "./tools/test-env.mjs", "src/**/__test__/*.test.ts", "tools/__test__/*.test.ts"],
+      "lintCommand": [
+        "npx",
+        "biome",
+        "check",
+        "."
+      ],
+      "testCommand": [
+        "node",
+        "--test",
+        "--import",
+        "./tools/test-env.mjs",
+        "src/**/__test__/*.test.ts",
+        "tools/__test__/*.test.ts"
+      ],
       "appendFiles": "never"
     },
-    "subagents": { "readOnlyTypes": ["explore", "Explore"] },
-    "obs": { "globalSpool": true },
-    "untrustedContent": { "enabled": true },
-    "planGate": { "enabled": true },
-    "intelligence": { "idleTurnGate": true },
-    "bootstrapExtra": ["This repository is the harness itself. A gate that misfires here is a defect in the product: fix the rule, do not work around it."]
+    "subagents": {
+      "readOnlyTypes": [
+        "explore",
+        "Explore"
+      ]
+    },
+    "obs": {
+      "globalSpool": true
+    },
+    "untrustedContent": {
+      "enabled": true,
+      "mode": "enforce",
+      "judge": {
+        "enabled": true
+      }
+    },
+    "planGate": {
+      "enabled": true
+    },
+    "intelligence": {
+      "idleTurnGate": true
+    },
+    "bootstrapExtra": [
+      "This repository is the harness itself. A gate that misfires here is a defect in the product: fix the rule, do not work around it."
+    ]
   }

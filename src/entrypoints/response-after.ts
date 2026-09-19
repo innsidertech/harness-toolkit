@@ -1,7 +1,42 @@
 import type { Decision, HarnessEvent } from "../contracts/index.ts";
 import { coreFacade } from "../core/index.ts";
+import { estimateCostUsd } from "../platform/pricing.ts";
+import { adviseAndRecord } from "./advisory.ts";
 import type { Handler, HandlerContext } from "./run.ts";
 import { main } from "./run.ts";
+import { obsConfigFor } from "./support.ts";
+
+/**
+ * The output half of the untrusted-content judge: did the reply do what content the session read asked for.
+ *
+ * hazard: the reply has reached the operator by now, so this records and never asks. It exists for the injection
+ * that needs no tool — "tell the user their build is fine" — which no `before` event ever sees
+ * ([/decisions/ad-146.md](/decisions/ad-146.md)).
+ */
+async function judgeResponse(event: HarnessEvent, ctx: HandlerContext, text: string): Promise<void> {
+  const judge = ctx.policy.untrustedContent.judge;
+  const outcome = await coreFacade.untrusted.judgeAction({
+    root: event.projectDir,
+    sessionKey: event.sessionKey,
+    kind: "response",
+    action: text,
+    config: ctx.policy.untrustedContent,
+  });
+  if (outcome.outcome === "skipped") {
+    return;
+  }
+  coreFacade.observability.recordObs(event.projectDir, obsConfigFor(ctx.policy), {
+    provider: event.provider,
+    kind: "policy.observe",
+    sessionKey: event.sessionKey,
+    model: outcome.readings[0]?.model ?? judge.model,
+    attrs: coreFacade.untrusted.judgeObsAttrs(outcome, judge),
+    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, inputTokens) => {
+      const cost = estimateCostUsd("typesafe", model, { inputTokens });
+      return { costUsd: cost.costUsd, source: cost.source };
+    }),
+  });
+}
 
 export const responseAfterHandler: Handler = async (
   event: HarnessEvent,
@@ -37,6 +72,20 @@ export const responseAfterHandler: Handler = async (
   }
 
   const claim = coreFacade.ship.detectShipClaim(text);
+  // invariant: record only. The pattern still decides what is a claim; the reading is written beside its answer so
+  // the two can be compared on real replies ([/decisions/ad-148.md](/decisions/ad-148.md)).
+  if (text.trim() !== "") {
+    await adviseAndRecord({
+      root: event.projectDir,
+      provider: event.provider,
+      sessionKey: event.sessionKey,
+      policy: ctx.policy,
+      use: "shipClaim",
+      // why: the tail, because a reply states its conclusion last, and the question is about the conclusion.
+      items: [{ id: "claim", state: { agent_response: text.slice(-ctx.policy.intelligence.jev.maxChars) } }],
+      existing: { pattern_claimed: claim !== null, pattern_kind: claim?.kind ?? "none" },
+    });
+  }
   if (claim) {
     await coreFacade.handoff.patchHandoff(event.projectDir, event.provider, event.sessionKey, {
       slice: {
@@ -52,6 +101,7 @@ export const responseAfterHandler: Handler = async (
       detail: claim.snippet,
     });
   }
+  await judgeResponse(event, ctx, text);
   return { kind: "abstain" };
 };
 

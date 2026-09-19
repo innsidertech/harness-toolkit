@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { flagsDir, machineConfigPath, projectConfigPath } from "../../platform/paths.ts";
+import { advisorConfigErrors } from "../advisor/advisor.types.ts";
 import { lessonsSyncMode, resolveSyncMode, type SyncModeResolution } from "../lesson/lesson.sync.ts";
 import { judgeConfigErrors } from "../untrusted/untrusted.types.ts";
 import { DEFAULTS } from "./policy.defaults.ts";
@@ -48,6 +49,10 @@ function deepMerge(base: Policy, patch: PartialPolicy): Policy {
           ...base.untrustedContent.judge.thresholds,
           ...patch.untrustedContent?.judge?.thresholds,
         },
+        scope: {
+          ...base.untrustedContent.judge.scope,
+          ...patch.untrustedContent?.judge?.scope,
+        },
       },
     },
     planGate: { ...base.planGate, ...patch.planGate },
@@ -59,6 +64,10 @@ function deepMerge(base: Policy, patch: PartialPolicy): Policy {
       lessons: {
         ...base.intelligence.lessons,
         ...patch.intelligence?.lessons,
+      },
+      jev: {
+        ...base.intelligence.jev,
+        ...patch.intelligence?.jev,
       },
     },
     codePaths: patch.codePaths ?? base.codePaths,
@@ -120,6 +129,18 @@ function judgeErrorsFor(pair: ConfigPair): string[] {
   ];
 }
 
+function advisorErrorsFor(pair: ConfigPair): string[] {
+  return [
+    ...advisorConfigErrors(pair.fromUser.intelligence?.jev),
+    ...advisorConfigErrors(pair.fromProject.intelligence?.jev),
+  ];
+}
+
+/** The advisor fields that cannot be read, from the same pair the loader merges. */
+export function resolveAdvisorConfigErrors(root: string): string[] {
+  return advisorErrorsFor(readConfigPair(root));
+}
+
 /**
  * The judge fields this project's configuration cannot be read from, with the field named.
  *
@@ -152,6 +173,9 @@ export function loadPolicy(root: string): Policy {
   // ([/decisions/ad-076.md](/decisions/ad-076.md), [/decisions/ad-146.md](/decisions/ad-146.md)).
   if (judgeErrorsFor(pair).length > 0) {
     merged.untrustedContent.judge.enabled = false;
+  }
+  if (advisorErrorsFor(pair).length > 0) {
+    merged.intelligence.jev.enabled = false;
   }
 
   return merged;
