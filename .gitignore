@@ -7,6 +7,12 @@
 .env.*
 !.env.example
 
+# The judge's credentials file. It belongs in the machine home, outside every repository — but a copy lands in
+# a checkout the moment someone runs the documented snippet from the wrong directory. Measured: one appeared
+# here on 2026-09-19, mode 600, untracked and unignored, which is the same one-`git add -A`-from-history state
+# the rule above was written for.
+credentials.json
+
 # Local / generated — never commit secrets or machine state.
 # Anchored to the root: a bare `config.json` matches at any depth and swallowed
 # .tlc/harness/config.json, which the rule below says is tracked on purpose.
