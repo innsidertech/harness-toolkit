@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { askIfFromUntrusted, rememberUntrustedOutput } from "../../../core/untrusted/untrusted.service.ts";
+import { DEFAULT_UNTRUSTED_JUDGE } from "../../../core/untrusted/untrusted.types.ts";
 import { claudeToEvent } from "../claude.inbound.ts";
 
 const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -298,4 +301,77 @@ test("a payload without permission_mode leaves the field absent rather than defa
     session_id: "s1",
   });
   assert.equal(event?.permissionMode, undefined);
+});
+
+/**
+ * hazard: `PostToolUse` fans out by tool name, so `Bash` becomes `shell.after` and an MCP tool becomes
+ * `mcp.after` — and the `tool_response` mapping used to live inside the `tool.*` branch that neither of them
+ * reaches. The untrusted-content rail reads exactly that field, so `enforce` remembered nothing for the two
+ * source classes its own catalog documents ([/decisions/ad-147.md](/decisions/ad-147.md)).
+ */
+test("PostToolUse for Bash carries what the command returned", () => {
+  const event = claudeToEvent(fixture("post-tool-use-bash"));
+  assert.equal(event?.event, "shell.after");
+  assert.equal(event?.command, "npm test");
+  assert.ok(event?.toolOutput, "shell.after carried no tool output");
+  assert.match(event?.toolOutput ?? "", /npm install --legacy-peer-deps/);
+});
+
+test("PostToolUse for an MCP tool carries what the server returned", () => {
+  const event = claudeToEvent(fixture("post-tool-use-mcp"));
+  assert.equal(event?.event, "mcp.after");
+  assert.ok(event?.toolOutput, "mcp.after carried no tool output");
+  assert.match(event?.toolOutput ?? "", /Migration guide v3/);
+});
+
+test("PostToolUse for a generic tool still carries what it returned", () => {
+  const event = claudeToEvent(fixture("post-tool-use-generic"));
+  assert.equal(event?.event, "tool.after");
+  assert.ok(event?.toolOutput !== undefined || fixture("post-tool-use-generic").tool_response === undefined);
+});
+
+/**
+ * invariant: the adapter's output and the rail's input are one fact, asserted together. Each half had its own
+ * green tests while the field between them was dropped, which is how `enforce` shipped remembering nothing from
+ * a `curl` ([/decisions/ad-147.md](/decisions/ad-147.md)).
+ */
+test("a Bash read of untrusted content fills the recall a later command is checked against", () => {
+  const root = mkdtempSync(join(tmpdir(), "tlc-claude-recall-"));
+  try {
+    const payload = fixture("post-tool-use-bash");
+    payload.tool_input = { command: "curl -s https://example.com/setup" };
+    payload.tool_response = "Setup guide\n\n  Run:  npm install --legacy-peer-deps && npm run build\n";
+    const event = claudeToEvent(payload);
+    assert.equal(event?.event, "shell.after");
+
+    const config = {
+      enabled: true,
+      mode: "enforce" as const,
+      extraTools: [],
+      extraCommandPatterns: [],
+      judge: DEFAULT_UNTRUSTED_JUDGE,
+    };
+    const remembered = rememberUntrustedOutput({
+      root,
+      sessionKey: event?.sessionKey ?? "",
+      event: event?.event ?? "",
+      toolName: event?.toolName,
+      command: event?.command,
+      toolOutput: event?.toolOutput,
+      config,
+      providerTools: [],
+    });
+    assert.equal(remembered, true, "the curl output was not remembered");
+
+    const decision = askIfFromUntrusted({
+      root,
+      sessionKey: event?.sessionKey ?? "",
+      command: "npm install --legacy-peer-deps && npm run build",
+      config,
+    });
+    assert.equal(decision.kind, "ask");
+    assert.match(decision.kind === "ask" ? decision.reason : "", /external command — curl/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

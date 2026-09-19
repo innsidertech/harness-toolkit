@@ -9,6 +9,7 @@ doctor reports against your own configuration.
 ## Unreleased
 
 - **AD-146** — the untrusted-content judge asks about rewritten commands, over the network, and only ever asks
+- **AD-147** — Claude Code's adapter dropped tool output for shell and MCP events, so enforce mode remembered nothing
 
 ## v0.16.2
 

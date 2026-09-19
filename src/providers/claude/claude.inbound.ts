@@ -166,6 +166,15 @@ export function claudeToEvent(raw: Record<string, unknown>): HarnessEvent | null
     }
   }
 
+  // hazard: this sat inside the `tool.*` branch, which `Bash` and MCP calls never reach — `PostToolUse` fans
+  // them out to `shell.after` and `mcp.after`. The untrusted rail reads this field, so `enforce` remembered
+  // nothing for `curl`, `wget`, the `gh` patterns or any MCP result, while reporting as on
+  // ([/decisions/ad-147.md](/decisions/ad-147.md)).
+  const toolResponse = raw.tool_response;
+  if (toolResponse !== undefined && toolResponse !== null) {
+    event.toolOutput = typeof toolResponse === "string" ? toolResponse : JSON.stringify(toolResponse);
+  }
+
   switch (eventKind) {
     case "prompt.submit": {
       const text = asString(raw.prompt);
@@ -221,12 +230,6 @@ export function claudeToEvent(raw: Record<string, unknown>): HarnessEvent | null
     case "tool.failure": {
       if (toolName) {
         event.toolName = toolName;
-      }
-      // why: an object here, unlike the two string fields Cursor uses. Serialising is the translation this layer
-      // exists to do, and core reads one shape ([/decisions/ad-004.md](/decisions/ad-004.md)).
-      const toolOutput = raw.tool_response;
-      if (toolOutput !== undefined && toolOutput !== null) {
-        event.toolOutput = typeof toolOutput === "string" ? toolOutput : JSON.stringify(toolOutput);
       }
       if (toolInput) {
         event.toolInput = toolInput;

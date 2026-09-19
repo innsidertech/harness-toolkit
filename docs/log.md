@@ -17,6 +17,7 @@ newest first. For what landed in which npm release, see `CHANGELOG.md` at the re
 
 - **AD-145** — a session's last real shell cwd is recalled wherever the host reports none ([/decisions/ad-145.md](/decisions/ad-145.md))
 - **AD-146** — the untrusted-content judge asks about rewritten commands, over the network, and only ever asks ([/decisions/ad-146.md](/decisions/ad-146.md))
+- **AD-147** — Claude Code's adapter dropped tool output for shell and MCP events, so enforce mode remembered nothing ([/decisions/ad-147.md](/decisions/ad-147.md))
 
 ## 2026-09-16
 
