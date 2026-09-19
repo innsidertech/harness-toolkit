@@ -18,7 +18,7 @@ function promptDir(root: string): string {
   return join(projectStateDir(root), "untrusted");
 }
 
-export function operatorPromptPath(root: string, sessionKey: string): string {
+function operatorPromptPath(root: string, sessionKey: string): string {
   return join(promptDir(root), `${sanitizeSegment(sessionKey)}.prompt`);
 }
 

@@ -28,7 +28,7 @@ export type UntrustedMode = "frame" | "enforce";
  * latency, which is the point — a shadow that does not pay the real cost does not measure it
  * ([/decisions/ad-146.md](/decisions/ad-146.md)).
  */
-export type UntrustedJudgeMode = "record" | "ask";
+type UntrustedJudgeMode = "record" | "ask";
 
 export type UntrustedJudgeConfig = {
   enabled: boolean;

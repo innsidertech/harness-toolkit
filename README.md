@@ -92,7 +92,7 @@ Three tiers, and which tier a check is in decides whether you can turn it off.
 |------|-------|--------------|------|
 | [Floor](#tier-1--the-floor-no-configuration-reaches-it) | 8 rules | Never | Before any policy is loaded, on every tool call, shell command and read |
 | [Always on](#tier-2--always-on-no-switch) | 3 checks | Never | After the floor, on every acting event |
-| [Rails](#tier-3--the-rails-you-choose) | 25 capabilities | Each one, individually | Where the table says |
+| [Rails](#tier-3--the-rails-you-choose) | 26 capabilities | Each one, individually | Where the table says |
 
 Nothing else runs. If a message on your screen is not from one of the thirty-six rows below, it is not the
 harness.
@@ -165,6 +165,7 @@ trade-off when you ran the init wizard. `configPath` is the key in `.tlc/harness
 | **Docs staleness gate**<br>`docs.command` · off | Runs the repository's own documentation staleness tool on stop, like a lint command. | `stop` | `block-stop` | tlc harness obs report; the docs gate writes the same gate-sessions/<session>.json artifact the lint and test gates do |
 | **Global observability spool**<br>`obs.globalSpool` · off | Copies every record into one file under the runtime home, so cost is readable across repositories. | `tool.after`<br>`tool.failure` | `record` | the spool file under the runtime home; tlc harness obs prune reports how many records it dropped |
 | **Untrusted-content framing and enforcement**<br>`untrustedContent.enabled` · off | Frames outside content as data, and in enforce mode asks before a command that appears verbatim in it. | `tool.after` | `context` | tlc harness obs report — one framing injection per turn, with the characters it cost |
+| **Untrusted-content judge (rewritten commands)**<br>`untrustedContent.judge.enabled` · off | Asks before a shell command that does what outside content asked for, even reworded. | `shell.before` | `ask` | tlc harness obs report — runs, asks, failures by category, latency and input tokens; tlc harness doctor reports it when enabled and inert or degraded |
 | **Plan gate (declared scope vs diff)**<br>`planGate.enabled` · off | Checks the files the turn changed against the scope it declared, and against any stated deviation. | `response.after`<br>`stop` | `block-stop` | tlc harness handoff — plan_paths, plan_at and plan_deviations |
 | **Observation mode (measure a rail with its rule off)**<br>`observe.enabled` · off | Runs a rail's checker while that rail is not enforcing, and records the reading without acting on it. | `stop`<br>`session.end` | `record` | tlc harness obs report — the observation readings, held apart from the refusal counters so those stay honest |
 | **Operator rules (your trigger, your proof)**<br>`rules.enabled` · off | Reads the rules you declare in markdown and enforces them: on this trigger, this must have happened. | `tool.before`<br>`stop` | `deny` | tlc harness doctor — each active rule, its tier, and any proof kind never observed here |

@@ -16,6 +16,7 @@ newest first. For what landed in which npm release, see `CHANGELOG.md` at the re
 ## 2026-09-19
 
 - **AD-145** — a session's last real shell cwd is recalled wherever the host reports none ([/decisions/ad-145.md](/decisions/ad-145.md))
+- **AD-146** — the untrusted-content judge asks about rewritten commands, over the network, and only ever asks ([/decisions/ad-146.md](/decisions/ad-146.md))
 
 ## 2026-09-16
 

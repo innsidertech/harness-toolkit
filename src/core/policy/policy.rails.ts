@@ -35,6 +35,12 @@ export function activeRails(policy: Policy): string[] {
   if (policy.untrustedContent.enabled) {
     rails.push("untrusted-content");
   }
+  // why: a row of its own, because the judge is a second rail behind one switch, with its own rule string and its
+  // own cost. An operator who enabled it and was never asked anything needs it named and silent rather than folded
+  // into the verbatim rail's count ([/decisions/ad-146.md](/decisions/ad-146.md)).
+  if (policy.untrustedContent.judge.enabled) {
+    rails.push("untrusted-judge");
+  }
   if (policy.intelligence.idleTurnGate) {
     rails.push("idle-turn");
   }

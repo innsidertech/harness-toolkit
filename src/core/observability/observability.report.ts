@@ -178,6 +178,49 @@ function gateTimeSection(rollup: SessionRollup): string {
   ].join("\n");
 }
 
+/**
+ * The judge's own readings, which no other section can carry: its runs are not decisions, so they are absent from
+ * the denial count and from the rails table until one of them actually asks.
+ *
+ * invariant: input tokens are always reported and the cost only where the machine's catalogue carries a rate for
+ * the answering model. No price is versioned in this repository, so `missing` is the ordinary state and the section
+ * says so rather than printing a zero ([/decisions/ad-096.md](/decisions/ad-096.md), [/decisions/ad-146.md](/decisions/ad-146.md)).
+ *
+ * why silent with no runs: a section about a capability nobody opted into is a line to skim past on every healthy
+ * install ([/decisions/ad-034.md](/decisions/ad-034.md)).
+ */
+export function judgeSection(rollup: SessionRollup): string {
+  const judge = rollup.judge;
+  if (judge === undefined || judge.runs === 0) {
+    return "";
+  }
+  const failures = Object.entries(judge.failures).sort((a, b) => b[1] - a[1]);
+  const failed = failures.reduce((total, [, count]) => total + count, 0);
+  const cost =
+    judge.costSource === "missing" || judge.costSource === "none"
+      ? `not available (cost_source: "missing" — no catalogue rate for the answering model)`
+      : `$${judge.costUsd.toFixed(6)}`;
+  return [
+    "",
+    "## Untrusted-content judge",
+    "",
+    "| Metric | Value |",
+    "|--------|-------|",
+    `| Runs | ${judge.runs} |`,
+    `| Asked | ${judge.asks} |`,
+    `| Ran and asked nobody | ${judge.quiet} |`,
+    `| Failed | ${failed} |`,
+    ...failures.map(([category, count]) => `| ↳ ${category} | ${count} |`),
+    `| Answered by another version | ${judge.drift} |`,
+    `| Latency total / worst ms | ${Math.round(judge.totalMs)} / ${Math.round(judge.worstMs)} |`,
+    `| Input tokens | ${judge.inputTokens} |`,
+    `| Estimated USD | ${cost} |`,
+    "",
+    "A run that asked nobody still cost a request and its latency. That ratio is the number a threshold is chosen",
+    "against; the asks by rule above are what an operator actually lived through.",
+  ].join("\n");
+}
+
 export function sessionReportMarkdown(rollup: SessionRollup, activeRules: readonly string[] = []): string {
   const models = Object.entries(rollup.models)
     .sort((a, b) => b[1] - a[1])
@@ -247,6 +290,7 @@ ${JSON.stringify(rollup.mcp, null, 2)}
 \`\`\`
 ${gateTimeSection(rollup)}
 ${railActivity(rollup, activeRules)}
+${judgeSection(rollup)}
 ${costLines(rollup).join("\n")}
 `;
 }
@@ -256,6 +300,35 @@ ${costLines(rollup).join("\n")}
 // the file ([/decisions/ad-063.md](/decisions/ad-063.md)).
 /** The tools whose successes are recorded as shell events, so the tools table can never count them. */
 export const SHELL_TOOLS = new Set(["Bash", "run_terminal_cmd", "terminal"]);
+
+/** invariant: the same numbers as the markdown section, or the two surfaces would answer differently. */
+function judgeScreenSections(rollup: SessionRollup): Array<{ title: string; rows: Row[] }> {
+  const judge = rollup.judge;
+  if (judge === undefined || judge.runs === 0) {
+    return [];
+  }
+  const failed = Object.values(judge.failures).reduce((total, count) => total + count, 0);
+  return [
+    {
+      title: "Untrusted-content judge",
+      rows: [
+        { label: "runs", value: `${judge.runs} (${judge.asks} asked, ${judge.quiet} quiet)` },
+        { label: "failed", value: String(failed), level: failed > 0 ? ("warn" as const) : ("ok" as const) },
+        {
+          label: "latency total/worst ms",
+          value: `${Math.round(judge.totalMs)} / ${Math.round(judge.worstMs)}`,
+        },
+        {
+          label: "input tokens",
+          value: `${judge.inputTokens}${judge.costSource === "missing" || judge.costSource === "none" ? " (no catalogue rate — cost unavailable)" : ` · $${judge.costUsd.toFixed(6)}`}`,
+        },
+        ...(judge.drift > 0
+          ? [{ label: "answered by another version", value: String(judge.drift), level: "warn" as const }]
+          : []),
+      ],
+    },
+  ];
+}
 
 export function sessionReportScreen(rollup: SessionRollup): Screen {
   const top = (counts: Record<string, number>, limit = 6): string[] =>
@@ -328,6 +401,7 @@ export function sessionReportScreen(rollup: SessionRollup): Screen {
         ],
       },
       ...(ruleRows.length > 0 ? [{ title: "Interruptions by rule", rows: ruleRows }] : []),
+      ...judgeScreenSections(rollup),
       ...(toolRows.length > 0 ? [{ title: "Tools", rows: toolRows }] : []),
       ...(Object.keys(rollup.models).length > 0
         ? [{ title: "Models", lines: [top(rollup.models).join("  ·  ")] }]

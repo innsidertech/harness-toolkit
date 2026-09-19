@@ -1,5 +1,5 @@
 {
-  "catalogVersion": 15,
+  "catalogVersion": 16,
   "capabilities": [
     {
       "id": "grind",
@@ -375,6 +375,27 @@
       "asks": [
         "mode: frame | enforce"
       ]
+    },
+    {
+      "id": "untrustedContentJudge",
+      "configPath": "untrustedContent.judge.enabled",
+      "title": "Untrusted-content judge (rewritten commands)",
+      "summary": "Asks before a shell command that does what outside content asked for, even reworded.",
+      "benefit": "Closes the gap the verbatim check states: an injected instruction the agent restates in its own words passes that check unseen. For each thing the session read from outside, one question set is put to TypeSafe's Jev asking whether the content tries to control an agent and whether the proposed command does what it asked for; above both thresholds the operator is asked, with the source named. It only ever asks, never denies.",
+      "tradeOff": "Four costs, all of them real. It makes a network call inside a hook, which nothing else in this harness does. The text of issues, pages and MCP results, your own prompt and the proposed command leave your machine for a third-party service hosted in the United States \u2014 secrets are redacted first, and the source rather than the text is what is recorded locally. It costs money per check, about US$0.03 per 1,000 checks at the measured token size. And it adds latency to every shell command in a session that read anything external \u2014 measured at 600 ms p95 for one request from Dublin, with a whole recall sent in one wave. It ships in record mode: it pays those costs and interrupts nobody, because the thresholds come from 20 authored cases and are not calibrated. Needs mode: enforce and a key in TYPESAFE_API_KEY or the machine home's credentials.json; doctor names it when enabled and inert.",
+      "defaultOn": false,
+      "sinceCatalogVersion": 16,
+      "fires": [
+        "shell.before"
+      ],
+      "verdict": "ask",
+      "inspect": "tlc harness obs report \u2014 runs, asks, failures by category, latency and input tokens; tlc harness doctor reports it when enabled and inert or degraded",
+      "asks": [
+        "mode: record | ask",
+        "thresholds",
+        "timeoutMs"
+      ],
+      "recommend": "off"
     },
     {
       "id": "planGate",

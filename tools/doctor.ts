@@ -779,6 +779,93 @@ function checkGateScope(root: string): Check[] {
   return checks;
 }
 
+/**
+ * The window and the share that make the judge "degraded".
+ *
+ * why constants rather than config fields: an operator tuning the threshold at which they are told their judge has
+ * stopped working is tuning a warning, not a capability. The task's open question left the numbers assumed rather
+ * than confirmed, and a constant with its number stated here is contestable; a tenth config field nobody reviewed
+ * is not ([/decisions/ad-146.md](/decisions/ad-146.md)).
+ */
+export const JUDGE_DEGRADED_WINDOW = 50;
+export const JUDGE_DEGRADED_SHARE = 0.3;
+
+type JudgeRun = { failed: boolean };
+
+function recentJudgeRuns(root: string): JudgeRun[] {
+  const events = coreFacade.observability.readSignalEvents(root, "obs.jsonl", 400);
+  return events
+    .filter((event) => event.kind === "policy.observe" && event.attrs.rail === "untrusted-judge")
+    .slice(-JUDGE_DEGRADED_WINDOW)
+    .map((event) => ({ failed: String(event.attrs.outcome ?? "").startsWith("error:") }));
+}
+
+/**
+ * The judge, when it is on and cannot work, and when it has stopped working.
+ *
+ * hazard: enabled under `frame` mode can never see anything, because recall is only written in `enforce` — and
+ * enabled with no key makes no request at all. Both read exactly like a working install from everywhere else, which
+ * is the shape [/decisions/ad-076.md](/decisions/ad-076.md) forbids.
+ *
+ * invariant: silent when the judge is off, and silent when it is healthy. A row on every install that never opted
+ * in is the [/decisions/ad-034.md](/decisions/ad-034.md) defect.
+ */
+export function checkJudge(root: string): Check[] {
+  const policy = coreFacade.policy.loadPolicy(root);
+  const { judge } = policy.untrustedContent;
+  const errors = coreFacade.policy.resolveJudgeConfigErrors(root);
+  if (errors.length > 0) {
+    return [
+      {
+        level: "fail",
+        name: "untrusted-content judge config",
+        detail: `${errors.join("; ")}. The judge is off until this is fixed in ${projectConfigPath(root)}.`,
+      },
+    ];
+  }
+  if (!judge.enabled) {
+    return [];
+  }
+
+  const checks: Check[] = [];
+  if (policy.untrustedContent.mode !== "enforce") {
+    checks.push({
+      level: "fail",
+      name: "untrusted-content judge",
+      detail: `enabled and inert: untrustedContent.mode is \`${policy.untrustedContent.mode}\`, so no untrusted content is ever remembered and the judge has nothing to read. Set \`untrustedContent.mode\` to \`enforce\` in ${projectConfigPath(root)}, or switch the judge off.`,
+    });
+  }
+  if (coreFacade.untrusted.resolveApiKey(process.env) === null) {
+    checks.push({
+      level: "fail",
+      name: "untrusted-content judge key",
+      detail: `enabled and inert: no key in TYPESAFE_API_KEY and none in ${coreFacade.untrusted.credentialsPath(process.env)}. A hook inherits the host's environment and no host passes an arbitrary variable through, so put it in that file as {"typesafeApiKey": "…"} and restart the host — or export it in the profile the host is launched from.`,
+    });
+  }
+
+  const runs = recentJudgeRuns(root);
+  const failed = runs.filter((run) => run.failed).length;
+  const share = runs.length === 0 ? 0 : failed / runs.length;
+  if (runs.length > 0 && share > JUDGE_DEGRADED_SHARE) {
+    checks.push({
+      level: "warn",
+      name: "untrusted-content judge health",
+      detail: `degraded: ${failed} of the last ${runs.length} runs ended in a timeout or an error (${Math.round(share * 100)}%, over ${Math.round(JUDGE_DEGRADED_SHARE * 100)}%). It is enabled and checking almost nothing. tlc harness obs report breaks the failures down by category.`,
+    });
+  }
+
+  if (checks.length === 0) {
+    return [
+      {
+        level: "ok",
+        name: "untrusted-content judge",
+        detail: `${judge.mode} mode, model ${judge.model}${runs.length > 0 ? `, ${runs.length} recent run${runs.length === 1 ? "" : "s"}, ${failed} failed` : ""}`,
+      },
+    ];
+  }
+  return checks;
+}
+
 export function checkProjectPolicy(root: string): Check[] {
   const configPath = projectConfigPath(root);
   const stateDir = projectStateDir(root);
@@ -802,6 +889,7 @@ export function checkProjectPolicy(root: string): Check[] {
     ...checkSubagentAllowlist(root),
     ...checkPolicyDivergence(root),
     ...checkGateScope(root),
+    ...checkJudge(root),
   ];
 }
 

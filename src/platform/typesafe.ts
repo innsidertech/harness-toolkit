@@ -38,7 +38,7 @@ export type SystemOneRequest = {
  */
 export type TypesafeErrorCategory = "invalid-request" | "auth" | "timeout" | "invalid-response" | "network";
 
-export type SystemOneOk = {
+type SystemOneOk = {
   ok: true;
   /** Question id to probability, already checked to be finite numbers. */
   answers: Record<string, number>;
@@ -48,7 +48,7 @@ export type SystemOneOk = {
   latencyMs: number;
 };
 
-export type SystemOneError = {
+type SystemOneError = {
   ok: false;
   category: TypesafeErrorCategory;
   /** One line for an operator, never a body dump and never a header. */

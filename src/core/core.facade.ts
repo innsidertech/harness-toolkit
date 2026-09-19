@@ -142,6 +142,7 @@ import {
   isUnderCodePaths,
   loadPolicy,
   resolvedWithoutProjectTier,
+  resolveJudgeConfigErrors,
   resolveProjectPosture,
   resolveProjectSyncMode,
 } from "./policy/policy.loader.ts";
@@ -240,7 +241,13 @@ import {
   nextLoop,
   resetLoop,
 } from "./turn/turn.loop-counter.ts";
-import { judgeGenAi, judgeObsAttrs, judgeShellCommand } from "./untrusted/untrusted.judge.ts";
+import {
+  credentialsPath,
+  judgeGenAi,
+  judgeObsAttrs,
+  judgeShellCommand,
+  resolveApiKey,
+} from "./untrusted/untrusted.judge.ts";
 import {
   clearOperatorPrompt,
   readOperatorPrompt,
@@ -434,6 +441,8 @@ export const coreFacade = {
     judgeShellCommand,
     judgeObsAttrs,
     judgeGenAi,
+    resolveApiKey,
+    credentialsPath,
   },
   plan: {
     detectPlan,
@@ -462,6 +471,7 @@ export const coreFacade = {
     pruneShadowed,
     unknownKeys,
     typeMismatches,
+    resolveJudgeConfigErrors,
     resolveProjectPosture,
     resolveProjectSyncMode,
     OPERATOR_MODES,

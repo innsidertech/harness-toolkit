@@ -61,6 +61,31 @@ export type SessionRollup = {
   input_tokens: number;
   output_tokens: number;
   cost_alert_sent: boolean;
+  /**
+   * The judge's own readings, which are not decisions and so are counted nowhere else. Optional because a rollup
+   * written before this field existed has none, and a session that never ran the judge never gains one — a zero row
+   * for a capability nobody opted into is the noise [/decisions/ad-034.md](/decisions/ad-034.md) names.
+   */
+  judge?: JudgeRollup;
+};
+
+export type JudgeRollup = {
+  runs: number;
+  asks: number;
+  /** Ran, cost money, interrupted nobody — record mode and below-threshold runs both land here. */
+  quiet: number;
+  /** Keyed by the client's own error category, so a dead service is distinguishable from a rejected key. */
+  failures: Record<string, number>;
+  drift: number;
+  totalMs: number;
+  worstMs: number;
+  inputTokens: number;
+  costUsd: number;
+  /**
+   * `missing` once any run's model had no rate in the machine's catalogue. No price is versioned in this
+   * repository, so that is the ordinary state rather than a fault ([/decisions/ad-096.md](/decisions/ad-096.md)).
+   */
+  costSource: string;
 };
 
 function safeMkdir(dir: string): boolean {

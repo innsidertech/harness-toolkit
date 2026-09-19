@@ -6,6 +6,10 @@ Each entry is an architectural decision record: what changed, why, what was refu
 A **Needs your action** line is a change `tlc harness doctor` cannot detect for you; everything else
 doctor reports against your own configuration.
 
+## Unreleased
+
+- **AD-146** — the untrusted-content judge asks about rewritten commands, over the network, and only ever asks
+
 ## v0.16.2
 
 - **AD-145** — a session's last real shell cwd is recalled wherever the host reports none

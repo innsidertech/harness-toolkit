@@ -3,9 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { QUESTION_IDS } from "../../core/untrusted/untrusted.judge.ts";
-import { EMPTY_RECALL, remember } from "../../core/untrusted/untrusted.recall.ts";
-import { writeRecall } from "../../core/untrusted/untrusted.store.ts";
+import { coreFacade } from "../../core/index.ts";
 import { projectConfigPath, projectStateDir } from "../../platform/paths.ts";
 import { runHandler } from "../run.ts";
 import { toolBeforeHandler } from "../tool-before.ts";
@@ -58,11 +56,17 @@ function project(untrusted: Record<string, unknown>, recall: string | null = INJ
   mkdirSync(join(root, ".tlc", "harness"), { recursive: true });
   writeFileSync(projectConfigPath(root), JSON.stringify({ version: 1, untrustedContent: untrusted }));
   if (recall !== null) {
-    writeRecall(
+    // why: seeded the way production seeds it — an untrusted read on `mcp.after` — so the fixture cannot drift
+    // from what the rail actually writes.
+    coreFacade.untrusted.rememberUntrustedOutput({
       root,
-      "claude-sess-1",
-      remember(EMPTY_RECALL, { source: "MCP tool — docs.search", text: recall }),
-    );
+      sessionKey: "claude-sess-1",
+      event: "mcp.after",
+      toolName: "docs.search",
+      toolOutput: recall,
+      config: { ...coreFacade.policy.loadPolicy(root).untrustedContent, enabled: true, mode: "enforce" },
+      providerTools: [],
+    });
   }
   return root;
 }
@@ -94,9 +98,11 @@ function doubleFetch(instructs: number, follows: number): Counter {
       JSON.stringify({
         model: "jev-1.13.0",
         answers: {
-          [QUESTION_IDS.instructs]: { type: "noul", noul: instructs },
-          [QUESTION_IDS.follows]: { type: "noul", noul: follows },
-          [QUESTION_IDS.serves]: { type: "noul", noul: 0.3 },
+          // invariant: the wire ids as literals. A test that imported them from the code under test could not
+          // catch a renamed question id, which is a breaking change against a service that reads them.
+          content_instructs_agent: { type: "noul", noul: instructs },
+          command_follows_content: { type: "noul", noul: follows },
+          command_serves_prompt: { type: "noul", noul: 0.3 },
         },
         usage: { input_tokens: 240 },
       }),
@@ -230,7 +236,8 @@ test("C15 a paraphrased command clearing both thresholds reaches the operator as
     assert.equal(attrs.source, "MCP tool — docs.search");
     // invariant: the token count lives in `gen_ai`, not in `attrs` — an attribute key containing `token` is
     // masked by the record's own redaction, which would report every judge run as costing nothing.
-    assert.equal((records[0]?.gen_ai as Record<string, unknown>).input_tokens, 240);
+    const genAi = records[0]?.gen_ai as Record<string, unknown> | undefined;
+    assert.equal(genAi?.input_tokens, 240);
     // invariant: the record carries the source and the probabilities, never the content and never the prompt.
     assert.equal(JSON.stringify(records).includes("paste.example.net"), false);
   } finally {

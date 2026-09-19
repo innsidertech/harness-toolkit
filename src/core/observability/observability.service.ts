@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { HarnessEvent } from "../../contracts/harness-event.ts";
+import type { JudgeRollup, SessionRollup } from "./observability.store.ts";
 import { appendAuditRecord, appendObsRecord, loadRollup, saveRollup } from "./observability.store.ts";
 import {
   DEFAULT_OBS,
@@ -95,6 +96,56 @@ export function recordObs(root: string, config: ObservabilityConfig, input: Reco
   return event;
 }
 
+const EMPTY_JUDGE: JudgeRollup = {
+  runs: 0,
+  asks: 0,
+  quiet: 0,
+  failures: {},
+  drift: 0,
+  totalMs: 0,
+  worstMs: 0,
+  inputTokens: 0,
+  costUsd: 0,
+  /** No run has reported a source yet — distinct from `missing`, which is a run that reported one. */
+  costSource: "none",
+};
+
+/**
+ * invariant: one run is one counted run whatever it produced. The interesting number for calibration is the ratio
+ * between what was paid for and what was asked, and it only exists if the quiet runs are counted too.
+ */
+function countJudgeRun(rollup: SessionRollup, event: ObsEvent): void {
+  // hazard: a rollup written before this field existed has none, and incrementing into `undefined` would throw on
+  // the path that must never break a turn.
+  const judge = rollup.judge ?? { ...EMPTY_JUDGE, failures: {} };
+  judge.runs += 1;
+  const outcome = String(event.attrs.outcome ?? "");
+  if (outcome === "ask") {
+    judge.asks += 1;
+  } else if (outcome.startsWith("error:")) {
+    const category = String(event.attrs.category ?? "unknown");
+    judge.failures[category] = (judge.failures[category] ?? 0) + 1;
+  } else {
+    judge.quiet += 1;
+  }
+  if (event.attrs.drift === true) {
+    judge.drift += 1;
+  }
+  const ms = Number(event.gen_ai?.duration_ms ?? event.attrs.latency_ms ?? 0);
+  judge.totalMs += ms;
+  judge.worstMs = Math.max(judge.worstMs, ms);
+  judge.inputTokens += Number(event.gen_ai?.input_tokens ?? 0);
+  if (typeof event.gen_ai?.cost_usd === "number") {
+    judge.costUsd += event.gen_ai.cost_usd;
+  }
+  // invariant: `missing` is sticky. One run whose model had no catalogue rate makes the total incomplete, and a
+  // number that silently excludes some of the runs is worse than saying so ([/decisions/ad-142.md](/decisions/ad-142.md)).
+  if (judge.costSource !== "missing") {
+    judge.costSource = event.gen_ai?.cost_source ?? judge.costSource;
+  }
+  rollup.judge = judge;
+}
+
 function updateRollup(root: string, config: ObservabilityConfig, event: ObsEvent): void {
   const sessionKey = event.session_id;
   if (!sessionKey) {
@@ -165,6 +216,9 @@ function updateRollup(root: string, config: ObservabilityConfig, event: ObsEvent
   }
   if (event.kind === "policy.deny") {
     rollup.denials += 1;
+  }
+  if (event.kind === "policy.observe" && event.attrs.rail === "untrusted-judge") {
+    countJudgeRun(rollup, event);
   }
   if (event.kind === "session.start" && typeof event.attrs.injected_chars === "number") {
     rollup.injected_chars = event.attrs.injected_chars;
@@ -320,6 +374,7 @@ export const ROLLUP_KINDS = [
   "mcp.end",
   "mcp.start",
   "policy.deny",
+  "policy.observe",
   "prompt.submit",
   "session.start",
   "shell.end",

@@ -506,6 +506,34 @@ Injected at most once per turn, keyed on a marker cleared at the prompt boundary
 context budget it exists to protect. When the provider cannot carry context on that event the decision
 abstains rather than rendering into a field the provider ignores.
 
+## untrusted-content judge
+
+`untrustedContent.judge.enabled` (off by default), and the only check in this harness that leaves the machine.
+The verbatim rail above misses a command the agent reworded, which is the ordinary case because agents
+paraphrase by default. The judge closes that gap by asking a model instead of a string comparison: on
+`shell.before`, after the floor and after the verbatim check, one request per remembered entry to TypeSafe's
+Jev, asking whether that content tries to control an agent and whether the proposed command does what it asked
+for. Above both thresholds the operator is asked, with the source named and never the text
+([/decisions/ad-146.md](/decisions/ad-146.md)).
+
+It only ever asks. The vendor states that this class of filter is not a security boundary, and the model is
+documented not to treat its state as hostile — so content that argues for its own classification can move the
+answer, and an injection that talks the judge round lands exactly where the harness already stands. Errors,
+timeouts and unusable bodies all abstain, because a third party's outage must not stop a command, and every one
+of them is recorded, because a control that is inert without saying so is worse than none. `doctor` names the
+judge when it is enabled and inert — `frame` mode, an unreadable config field, or no key — and again once more
+than 30% of its recent runs failed.
+
+`untrustedContent.judge.mode` ships as `record`: it makes the call, pays for it, writes the reading and
+interrupts nobody. That is deliberate. The thresholds come from 20 cases their own author wrote, which is a
+direction rather than a calibration, so `ask` is not recommended to anyone until per-question curves come from
+real readings.
+
+The costs are stated in full in the capability catalog, because the consent is not "turn on a rail" — it is
+"send the text of issues, pages and your own prompts to a third party in the United States". Secrets are
+redacted first, the key comes from `TYPESAFE_API_KEY` or a credentials file under the machine home and never
+from project config, and the local record carries sources, probabilities and metrics only.
+
 ## global observability spool
 
 `obs.globalSpool` (off by default). Every record already written under the project state directory is also

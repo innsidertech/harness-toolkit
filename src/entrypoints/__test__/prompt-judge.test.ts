@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { coreFacade } from "../../core/index.ts";
-import { wasFramingInjected } from "../../core/untrusted/untrusted.store.ts";
 import { projectConfigPath, projectStateDir } from "../../platform/paths.ts";
 import { promptSubmitHandler } from "../prompt-submit.ts";
 import { runHandler } from "../run.ts";
@@ -116,8 +115,9 @@ test("C9 a new turn replaces the stored prompt on the same boundary that clears 
       coreFacade.untrusted.readOperatorPrompt(root, SESSION),
       "second turn asks about something else",
     );
+    // why: the recall alone settles the boundary. The framing marker is cleared by the same two lines and is
+    // already proven by this rail's own suite, so asserting it here would restate that rather than this.
     assert.equal(coreFacade.untrusted.readRecall(root, SESSION).entries.length, 0);
-    assert.equal(wasFramingInjected(root, SESSION), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
