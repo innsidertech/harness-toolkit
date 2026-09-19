@@ -4,6 +4,7 @@ import type { Decision, HarnessEvent } from "../contracts/index.ts";
 import { coreFacade } from "../core/index.ts";
 import type { AddedLine } from "../platform/git.ts";
 import { diffProposedAgainstDisk, diffTwoStrings, localRepoRemote } from "../platform/git.ts";
+import { estimateCostUsd } from "../platform/pricing.ts";
 import { normalizeSeparators } from "../platform/sanitize.ts";
 import type { Handler, HandlerContext } from "./run.ts";
 import { main } from "./run.ts";
@@ -187,6 +188,46 @@ function recordShellDecision(event: HarnessEvent, ctx: HandlerContext, decision:
   });
 }
 
+/**
+ * The paraphrase half of the untrusted-content rail.
+ *
+ * invariant: `shell.before` only. The prelude runs for every event kind, and the judge's question set is about a
+ * shell command — writes, edits and MCP calls need a different notion of "derived from" and are out of scope.
+ *
+ * invariant: every run that made a request is recorded, including the ones that asked nobody and the ones that
+ * failed. The `ask` itself needs no record here — `recordShellDecision` already writes every rail decision with
+ * its rule ([/decisions/ad-076.md](/decisions/ad-076.md)).
+ */
+async function judgeDecision(event: HarnessEvent, ctx: HandlerContext): Promise<Decision> {
+  if (event.event !== "shell.before") {
+    return { kind: "abstain" };
+  }
+  const outcome = await coreFacade.untrusted.judgeShellCommand({
+    root: event.projectDir,
+    sessionKey: event.sessionKey,
+    command: event.command,
+    config: ctx.policy.untrustedContent,
+    redactOutput: ctx.policy.secrets.redactOutput,
+  });
+  if (outcome.outcome === "skipped") {
+    return { kind: "abstain" };
+  }
+  coreFacade.observability.recordObs(event.projectDir, obsConfigFor(ctx.policy), {
+    provider: event.provider,
+    kind: "policy.observe",
+    sessionKey: event.sessionKey,
+    // why: the answering model rather than the session's — this record is about what the judge cost, and the price
+    // catalogue is keyed by the model that was actually billed.
+    model: outcome.readings[0]?.model ?? ctx.policy.untrustedContent.judge.model,
+    attrs: coreFacade.untrusted.judgeObsAttrs(outcome, ctx.policy.untrustedContent.judge),
+    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, inputTokens) => {
+      const cost = estimateCostUsd("typesafe", model, { inputTokens });
+      return { costUsd: cost.costUsd, source: cost.source };
+    }),
+  });
+  return outcome.decision;
+}
+
 function recordShellDecisionIfShell(event: HarnessEvent, ctx: HandlerContext, decision: Decision): void {
   if (event.event === "shell.before") {
     recordShellDecision(event, ctx, decision);
@@ -359,6 +400,18 @@ export const toolBeforeHandler: Handler = async (
   });
   if (untrustedAsk.kind !== "abstain") {
     return untrustedAsk;
+  }
+
+  /**
+   * why here: after the verbatim check, because a command that check already matched is a command this rail has
+   * already asked about, and the judge would spend a network call to reach the same answer. This is the first
+   * check in the harness that leaves the machine, so every cheaper way of abstaining runs before it
+   * ([/decisions/ad-146.md](/decisions/ad-146.md)).
+   */
+  const judged = await judgeDecision(event, ctx);
+  if (judged.kind !== "abstain") {
+    recordShellDecisionIfShell(event, ctx, judged);
+    return judged;
   }
 
   // invariant: unconditional, for the same reason the floor is. This detects a policy that changed without

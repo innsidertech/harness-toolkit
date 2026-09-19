@@ -94,3 +94,29 @@ export function scanForSecrets(text: string | undefined): SecretMatch[] {
   const entropy = entropyMatches(text, signature);
   return [...signature, ...entropy].sort((a, b) => a.start - b.start);
 }
+
+/**
+ * Replace every match with the placeholder the caller resolves for it.
+ *
+ * why here rather than at a call site: two paths now send text somewhere it should not follow — the rewritten tool
+ * output, and the content the judge puts to a third party. The offset walk is the part that is easy to get wrong,
+ * so it exists once ([/decisions/ad-124.md](/decisions/ad-124.md), [/decisions/ad-146.md](/decisions/ad-146.md)).
+ *
+ * invariant: reversed, so each replacement's `[start, end)` offsets — computed against the original string — stay
+ * valid as the string's length changes underneath the earlier ones.
+ */
+export function maskSecrets(
+  text: string,
+  placeholderFor: (matchedText: string, kind: string) => string,
+): string {
+  const matches = scanForSecrets(text);
+  if (matches.length === 0) {
+    return text;
+  }
+  let masked = text;
+  for (const match of [...matches].reverse()) {
+    const placeholder = placeholderFor(text.slice(match.start, match.end), match.kind);
+    masked = `${masked.slice(0, match.start)}${placeholder}${masked.slice(match.end)}`;
+  }
+  return masked;
+}

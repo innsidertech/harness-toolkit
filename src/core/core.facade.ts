@@ -194,7 +194,7 @@ import {
   recordObservation,
 } from "./rules/rules.store.ts";
 import { firingRules, mentionsGhApi, mentionsMcpAct, triggerMatches } from "./rules/rules.trigger.ts";
-import { scanForSecrets } from "./secret-scan/secret-scan.service.ts";
+import { maskSecrets, scanForSecrets } from "./secret-scan/secret-scan.service.ts";
 import { placeholderFor } from "./secret-scan/secret-scan.store.ts";
 import { evaluateShellCommand } from "./shell-policy/shell-policy.service.ts";
 import { clearShellStall } from "./shell-policy/shell-policy.stall.ts";
@@ -240,6 +240,7 @@ import {
   nextLoop,
   resetLoop,
 } from "./turn/turn.loop-counter.ts";
+import { judgeGenAi, judgeObsAttrs, judgeShellCommand } from "./untrusted/untrusted.judge.ts";
 import {
   clearOperatorPrompt,
   readOperatorPrompt,
@@ -430,6 +431,9 @@ export const coreFacade = {
     rememberOperatorPrompt,
     readOperatorPrompt,
     clearOperatorPrompt,
+    judgeShellCommand,
+    judgeObsAttrs,
+    judgeGenAi,
   },
   plan: {
     detectPlan,
@@ -556,6 +560,7 @@ export const coreFacade = {
     evaluateFloor,
   },
   secretScan: {
+    maskSecrets,
     scanForSecrets,
     placeholderFor,
   },

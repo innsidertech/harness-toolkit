@@ -135,20 +135,10 @@ export const toolAfterHandler: Handler = async (event: HarnessEvent, ctx: Handle
 
   if (ctx.policy.secrets.redactOutput && event.toolOutput) {
     const output = event.toolOutput;
-    const matches = coreFacade.secretScan.scanForSecrets(output);
-    if (matches.length > 0) {
-      let masked = output;
-      // why: reversed so each replacement's [start, end) offsets, computed against the original string, stay
-      // valid as the string's length changes underneath earlier ones.
-      for (const match of [...matches].reverse()) {
-        const placeholder = coreFacade.secretScan.placeholderFor(
-          event.projectDir,
-          event.sessionKey,
-          output.slice(match.start, match.end),
-          match.kind,
-        );
-        masked = `${masked.slice(0, match.start)}${placeholder}${masked.slice(match.end)}`;
-      }
+    const masked = coreFacade.secretScan.maskSecrets(output, (matchedText, kind) =>
+      coreFacade.secretScan.placeholderFor(event.projectDir, event.sessionKey, matchedText, kind),
+    );
+    if (masked !== output) {
       return { kind: "rewriteOutput", output: masked };
     }
   }
