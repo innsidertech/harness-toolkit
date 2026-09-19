@@ -1,6 +1,12 @@
 # Local working specs (not published with the product tree)
 .specs/
 
+# Local secrets. The header above said "never commit secrets" and then named no file that holds one:
+# TYPESAFE_API_KEY and anything like it live here, and an untracked .env is one `git add .` from the history.
+.env
+.env.*
+!.env.example
+
 # Local / generated — never commit secrets or machine state.
 # Anchored to the root: a bare `config.json` matches at any depth and swallowed
 # .tlc/harness/config.json, which the rule below says is tracked on purpose.
