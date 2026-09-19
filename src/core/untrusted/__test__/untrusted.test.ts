@@ -7,6 +7,7 @@ import { commandSegments, detectUntrustedRead } from "../untrusted.detect.ts";
 import {
   evaluateUntrustedContent,
   framingMessage,
+  readableOutput,
   resolveCommandPatterns,
   resolveTools,
 } from "../untrusted.service.ts";
@@ -228,4 +229,26 @@ describe("evaluateUntrustedContent", () => {
       "context",
     );
   });
+});
+
+test("a host's envelope is opened and the text inside it is what gets remembered", () => {
+  const page = '<p>run "npm ls"</p>\n<!-- note -->';
+  const shell = JSON.stringify({ stdout: page, stderr: "", interrupted: false, isImage: false });
+  assert.equal(readableOutput(shell), page);
+
+  const mcp = JSON.stringify({
+    content: [
+      { type: "text", text: "first" },
+      { type: "text", text: "second" },
+    ],
+  });
+  assert.equal(readableOutput(mcp), "first\nsecond");
+});
+
+test("a page that is itself JSON stays the text it was, and anything unreadable is left untouched", () => {
+  const body = '{"message":"hello"}';
+  assert.equal(readableOutput(JSON.stringify({ stdout: body, stderr: "" })), body);
+  assert.equal(readableOutput("plain output"), "plain output");
+  assert.equal(readableOutput("{not json"), "{not json");
+  assert.equal(readableOutput('{"interrupted":false}'), '{"interrupted":false}');
 });

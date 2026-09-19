@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { coreFacade } from "../src/core/index.ts";
+import { readTrace, traceMarkdown, tracePath, traceText } from "../src/core/jev/jev.trace.ts";
 import { readSignalEvents } from "../src/core/observability/observability.store.ts";
 import { DEFAULT_OBS, LIVE_ALLOWLIST, type ObsEvent } from "../src/core/observability/observability.types.ts";
 import { loadPolicy } from "../src/core/policy/policy.loader.ts";
@@ -68,6 +69,49 @@ export function latestSessionId(root: string): string | null {
     .sort((a, b) => (a.at === b.at ? a.name.localeCompare(b.name) : a.at - b.at));
   const last = dated.at(-1)?.name;
   return last ? last.replace(/\.json$/, "") : null;
+}
+
+/** Which of the two Jev blocks keep a trace, in the words an operator edits. */
+export function traceSwitches(root: string): { path: string; on: boolean }[] {
+  const policy = loadPolicy(root);
+  return [
+    { path: "untrustedContent.judge.trace", on: policy.untrustedContent.judge.trace },
+    { path: "intelligence.jev.trace", on: policy.intelligence.jev.trace },
+  ];
+}
+
+// why: the terminal gets the shape of each exchange and the file gets all of it, the way `report` already splits.
+const TERMINAL_FIELD_CHARS = 600;
+
+function jevCommand(root: string, args: readonly string[], json: boolean): void {
+  const full = args.includes("--full");
+  const limit = limitFrom(
+    args.find((arg) => !arg.startsWith("--")),
+    20,
+  );
+  const switches = traceSwitches(root);
+  const records = readTrace(root, limit);
+  if (json) {
+    emitJson({ count: records.length, trace: switches, file: tracePath(root), exchanges: records });
+    return;
+  }
+  const style = createStyle();
+  const state = switches.map((entry) => `${entry.path}=${entry.on}`).join("  ");
+  if (records.length === 0) {
+    console.log(`(no Jev exchanges kept yet)  ${state}`);
+    console.log(
+      style.dim(
+        "Set `trace` to true in the block you want to watch, accept the policy change from your own terminal,\nand every request and answer from then on is kept.",
+      ),
+    );
+    return;
+  }
+  console.log(traceText(records, full ? 0 : TERMINAL_FIELD_CHARS, style));
+  const reportsDir = join(projectStateDir(root), "reports");
+  mkdirSync(reportsDir, { recursive: true });
+  const path = join(reportsDir, "jev-exchanges.md");
+  writeFileSync(path, traceMarkdown(records));
+  console.log(style.dim(`\n${state}\nuncut copy, with the raw bodies: ${path}`));
 }
 
 function main(argv: string[]): void {
@@ -149,6 +193,11 @@ function main(argv: string[]): void {
     process.exit(0);
   }
 
+  if (cmd === "jev") {
+    jevCommand(root, rest.slice(1), json);
+    process.exit(0);
+  }
+
   if (cmd === "rollup") {
     if (!arg) {
       console.error("usage: tlc harness obs rollup <conversation_id>");
@@ -176,7 +225,7 @@ function main(argv: string[]): void {
     process.exit(0);
   }
 
-  console.error("usage: tlc harness obs <live|events|why|report|rollup|prune> [arg] [--json]");
+  console.error("usage: tlc harness obs <live|events|why|report|jev|rollup|prune> [arg] [--json]");
   process.exit(1);
 }
 

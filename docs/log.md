@@ -19,6 +19,8 @@ newest first. For what landed in which npm release, see `CHANGELOG.md` at the re
 - **AD-146** — the untrusted-content judge asks about rewritten commands, over the network, and only ever asks ([/decisions/ad-146.md](/decisions/ad-146.md))
 - **AD-147** — Claude Code's adapter dropped tool output for shell and MCP events, so enforce mode remembered nothing ([/decisions/ad-147.md](/decisions/ad-147.md))
 - **AD-148** — Jev is asked about four of the harness's own judgement calls, beside the rule that already makes each, and changes none of them ([/decisions/ad-148.md](/decisions/ad-148.md))
+- **AD-149** — An opt-in trace keeps every exchange with Jev, as sent and as answered, in a file of its own ([/decisions/ad-149.md](/decisions/ad-149.md))
+- **AD-150** — The judge is sent the text a read returned rather than the host's envelope, skips the prompt question when the prompt states no task, counts output tokens, and records a fourth reading about consequence ([/decisions/ad-150.md](/decisions/ad-150.md))
 
 ## 2026-09-16
 

@@ -39,6 +39,7 @@
       "enabled": true,
       "mode": "enforce",
       "judge": {
+        "trace": true,
         "enabled": true
       }
     },
@@ -46,7 +47,10 @@
       "enabled": true
     },
     "intelligence": {
-      "idleTurnGate": true
+      "idleTurnGate": true,
+      "jev": {
+        "trace": true
+      }
     },
     "bootstrapExtra": [
       "This repository is the harness itself. A gate that misfires here is a defect in the product: fix the rule, do not work around it."

@@ -120,8 +120,8 @@ async function screenRememberedRead(event: HarnessEvent, ctx: HandlerContext): P
     sessionKey: event.sessionKey,
     model: outcome.model === "none" ? judge.model : outcome.model,
     attrs: coreFacade.untrusted.screenObsAttrs(outcome, judge),
-    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, inputTokens) => {
-      const cost = estimateCostUsd("typesafe", model, { inputTokens });
+    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, usage) => {
+      const cost = estimateCostUsd("typesafe", model, usage);
       return { costUsd: cost.costUsd, source: cost.source };
     }),
   });

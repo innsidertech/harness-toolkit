@@ -48,6 +48,13 @@ export type UntrustedJudgeConfig = {
   scope: { command: boolean; edit: boolean; mcp: boolean; response: boolean };
   /** invariant: pinned. `jev-latest` moves without notice, and every threshold is tuned against one version. */
   model: string;
+  /**
+   * Keep every exchange with the service, as sent and as answered, in `state/jev-trace.jsonl`.
+   *
+   * hazard: the one switch that writes the sent text to disk — content, prompt and command, masked. The obs record
+   * stays numbers whatever this says ([/decisions/ad-149.md](/decisions/ad-149.md)).
+   */
+  trace: boolean;
 };
 
 export type UntrustedPolicyConfig = {
@@ -80,6 +87,7 @@ export const DEFAULT_UNTRUSTED_JUDGE: UntrustedJudgeConfig = {
   maxOperatorPromptChars: 4000,
   scope: { command: true, edit: false, mcp: false, response: false },
   model: "jev-1.13.0",
+  trace: false,
 };
 
 const PROBABILITY_FIELDS = ["contentInstructsAgent", "commandFollowsContent"] as const;
@@ -165,6 +173,9 @@ export function judgeConfigErrors(judge: Partial<UntrustedJudgeConfig> | undefin
     ...modelError(judge.model),
     ...scopeErrors(judge.scope),
   );
+  if (judge.trace !== undefined && typeof judge.trace !== "boolean") {
+    errors.push(`untrustedContent.judge.trace must be true or false, got ${JSON.stringify(judge.trace)}`);
+  }
   if (judge.mode !== undefined && judge.mode !== "record" && judge.mode !== "ask") {
     errors.push(`untrustedContent.judge.mode must be record or ask, got ${JSON.stringify(judge.mode)}`);
   }

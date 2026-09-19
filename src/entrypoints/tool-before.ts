@@ -244,8 +244,8 @@ async function judgeDecision(event: HarnessEvent, ctx: HandlerContext): Promise<
     // catalogue is keyed by the model that was actually billed.
     model: outcome.readings[0]?.model ?? ctx.policy.untrustedContent.judge.model,
     attrs: coreFacade.untrusted.judgeObsAttrs(outcome, ctx.policy.untrustedContent.judge),
-    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, inputTokens) => {
-      const cost = estimateCostUsd("typesafe", model, { inputTokens });
+    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, usage) => {
+      const cost = estimateCostUsd("typesafe", model, usage);
       return { costUsd: cost.costUsd, source: cost.source };
     }),
   });

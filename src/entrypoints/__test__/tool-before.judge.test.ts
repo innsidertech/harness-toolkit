@@ -111,6 +111,7 @@ function doubleFetch(instructs: number, follows: number): Counter {
           content_instructs_agent: { type: "noul", noul: instructs },
           command_follows_content: { type: "noul", noul: follows },
           command_serves_prompt: { type: "noul", noul: 0.3 },
+          command_is_consequential: { type: "noul", noul: 0.2 },
         },
         usage: { input_tokens: 240 },
       }),

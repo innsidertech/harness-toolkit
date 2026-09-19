@@ -45,6 +45,8 @@ type SystemOneOk = {
   /** The version that actually answered, which is the only signal that the pin moved. */
   model: string;
   inputTokens: number;
+  /** why counted: the service bills its answers too — measured at 43 on a two-question request, never zero. */
+  outputTokens: number;
   latencyMs: number;
 };
 
@@ -58,6 +60,14 @@ type SystemOneError = {
 
 export type SystemOneResult = SystemOneOk | SystemOneError;
 
+/**
+ * One HTTP answer as it arrived, for a caller that asked to watch.
+ *
+ * why beside the result rather than in it: the result is what routes, and it stays the checked numbers. The body is
+ * for an operator's eyes only, and only a trace that was switched on ever receives it.
+ */
+export type SystemOneAttempt = { status: number; body: unknown };
+
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 export type SystemOneOptions = {
@@ -69,7 +79,11 @@ export type SystemOneOptions = {
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  /** Called once per HTTP answer, retried ones included. Absent, no error body is ever read. */
+  observe?: (attempt: SystemOneAttempt) => void;
 };
+
+type Observe = ((attempt: SystemOneAttempt) => void) | undefined;
 
 /** invariant: retried on these and on nothing else. A validation fault repeated is the same validation fault. */
 const RETRYABLE_STATUS = new Set([429, 529]);
@@ -117,12 +131,12 @@ function readAnswers(body: ParsedBody, ids: readonly string[]): Record<string, n
   return out;
 }
 
-function inputTokensOf(body: ParsedBody): number {
+function usageOf(body: ParsedBody, field: "input_tokens" | "output_tokens"): number {
   const usage = body.usage;
   if (usage === null || typeof usage !== "object") {
     return 0;
   }
-  const tokens = (usage as { input_tokens?: unknown }).input_tokens;
+  const tokens = (usage as Record<string, unknown>)[field];
   return typeof tokens === "number" && Number.isFinite(tokens) ? tokens : 0;
 }
 
@@ -151,15 +165,21 @@ function verdictForStatus(status: number): StatusVerdict {
   return { kind: "usable" };
 }
 
-type Reading = { answers: Record<string, number>; model: string; inputTokens: number };
+type Reading = { answers: Record<string, number>; model: string; inputTokens: number; outputTokens: number };
 
-async function readBody(response: Response, ids: readonly string[]): Promise<Reading | Failure> {
+async function readBody(
+  response: Response,
+  ids: readonly string[],
+  observe: Observe,
+): Promise<Reading | Failure> {
   let parsed: ParsedBody;
   try {
     parsed = (await response.json()) as ParsedBody;
   } catch {
+    observe?.({ status: response.status, body: null });
     return { category: "invalid-response", detail: "body is not JSON" };
   }
+  observe?.({ status: response.status, body: parsed });
   if (parsed === null || typeof parsed !== "object") {
     return { category: "invalid-response", detail: "body is not an object" };
   }
@@ -172,19 +192,38 @@ async function readBody(response: Response, ids: readonly string[]): Promise<Rea
     // why: reported as it came back, never defaulted to the pin. A missing version is drift that cannot be told
     // from agreement if the pin is substituted for it.
     model: typeof parsed.model === "string" ? parsed.model : "(absent)",
-    inputTokens: inputTokensOf(parsed),
+    inputTokens: usageOf(parsed, "input_tokens"),
+    outputTokens: usageOf(parsed, "output_tokens"),
   };
+}
+
+/** why text first: a refusal's body is often not JSON, and what it says is the reason an operator is watching. */
+async function refusalBody(response: Response): Promise<unknown> {
+  try {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  } catch {
+    return null;
+  }
 }
 
 async function readResponse(
   response: Response,
   ids: readonly string[],
+  observe: Observe,
 ): Promise<Reading | "retry" | Failure> {
   const verdict = verdictForStatus(response.status);
-  if (verdict.kind === "failed") {
-    return { category: verdict.category, detail: verdict.detail };
+  if (verdict.kind === "usable") {
+    return readBody(response, ids, observe);
   }
-  return verdict.kind === "retry" ? "retry" : readBody(response, ids);
+  if (observe) {
+    observe({ status: response.status, body: await refusalBody(response) });
+  }
+  return verdict.kind === "retry" ? "retry" : { category: verdict.category, detail: verdict.detail };
 }
 
 /**
@@ -205,6 +244,7 @@ export async function askSystemOne(
     now = () => Date.now(),
     sleep = defaultSleep,
     random = Math.random,
+    observe,
   } = options;
 
   const started = now();
@@ -232,7 +272,7 @@ export async function askSystemOne(
         body,
         signal: controller.signal,
       });
-      const outcome = await readResponse(response, ids);
+      const outcome = await readResponse(response, ids, observe);
       // why: an aborted body read surfaces from `json()` as a parse failure, which would misfile a timeout.
       if (typeof outcome === "object" && "category" in outcome && controller.signal.aborted) {
         return { category: "timeout", detail: `aborted after ${timeoutMs} ms` };

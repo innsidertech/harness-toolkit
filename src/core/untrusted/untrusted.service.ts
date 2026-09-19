@@ -63,6 +63,48 @@ export function evaluateUntrustedContent(args: {
   return { kind: "context", text: framingMessage(hit) };
 }
 
+function stringsIn(value: unknown, out: string[]): void {
+  if (typeof value === "string") {
+    if (value.trim() !== "") {
+      out.push(value);
+    }
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, inner] of Object.entries(value)) {
+      // why: `"type":"text"` is how an MCP result labels a part, and the label is not something the content said.
+      if (key !== "type" || typeof inner !== "string") {
+        stringsIn(inner, out);
+      }
+    }
+  }
+}
+
+/**
+ * What the read said, without the envelope the host put it in.
+ *
+ * why: measured — a host hands a shell result over as `{"stdout":"…","stderr":"","interrupted":false,…}`, serialised.
+ * Remembered as it came, every quote and newline of the page is escaped, so a command quoted in the content no
+ * longer appears verbatim in the recall, and the judge is sent flags and keys its questions never name — which is
+ * the documented way to lose accuracy.
+ *
+ * invariant: only an envelope is opened. A string inside it is kept as it is, so a page that is itself JSON stays
+ * the text it was. Output that is not a JSON object or array, or carries no text, is returned untouched.
+ */
+export function readableOutput(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return raw;
+  }
+  try {
+    const found: string[] = [];
+    stringsIn(JSON.parse(trimmed), found);
+    return found.length > 0 ? found.join("\n") : raw;
+  } catch {
+    return raw;
+  }
+}
+
 /**
  * Record what an untrusted read returned, so a later command can be checked against it.
  *
@@ -95,7 +137,7 @@ export function rememberUntrustedOutput(args: {
   }
   const next = remember(readRecall(args.root, args.sessionKey), {
     source: `${SOURCE_LABEL[hit.source]} — ${hit.detail}`,
-    text: args.toolOutput,
+    text: readableOutput(args.toolOutput),
   });
   writeRecall(args.root, args.sessionKey, next);
   return true;

@@ -26,6 +26,7 @@ export type AdvisorOutcome = {
   failure?: { category: TypesafeErrorCategory; detail: string };
   requests: number;
   inputTokens: number;
+  outputTokens: number;
   latencyMs: number;
 };
 
@@ -81,6 +82,7 @@ function skipped(use: AdvisorUse): AdvisorOutcome {
     drift: false,
     requests: 0,
     inputTokens: 0,
+    outputTokens: 0,
     latencyMs: 0,
   };
 }
@@ -147,10 +149,12 @@ export async function advise(args: {
     ask: args.ask ?? liveAsk,
     now,
     started,
+    trace: { root: args.root, sessionKey: args.sessionKey, caller: `advisor:${use}` },
   });
 
   const scores: Record<string, number> = {};
   let inputTokens = 0;
+  let outputTokens = 0;
   let model = "none";
   let drift = false;
   for (const [index, result] of results.entries()) {
@@ -164,11 +168,13 @@ export async function advise(args: {
         failure: { category: result.category, detail: result.detail },
         requests: results.length,
         inputTokens,
+        outputTokens,
         latencyMs: now() - started,
       };
     }
     scores[(args.items[index] as AdvisorItem).id] = result.answers.answer ?? 0;
     inputTokens += result.inputTokens;
+    outputTokens += result.outputTokens;
     model = result.model;
     drift = drift || result.model !== config.model;
   }
@@ -180,6 +186,7 @@ export async function advise(args: {
     drift,
     requests: results.length,
     inputTokens,
+    outputTokens,
     latencyMs: now() - started,
   };
 }

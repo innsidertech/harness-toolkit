@@ -34,7 +34,10 @@ export async function adviseAndRecord(args: {
   if (outcome.outcome === "skipped") {
     return outcome;
   }
-  const cost = estimateCostUsd("typesafe", outcome.model, { inputTokens: outcome.inputTokens });
+  const cost = estimateCostUsd("typesafe", outcome.model, {
+    inputTokens: outcome.inputTokens,
+    outputTokens: outcome.outputTokens,
+  });
   coreFacade.observability.recordObs(args.root, obsConfigFor(args.policy), {
     provider: args.provider,
     kind: "policy.observe",
@@ -43,7 +46,7 @@ export async function adviseAndRecord(args: {
     attrs: coreFacade.advisor.advisorObsAttrs(outcome, config, args.existing),
     gen_ai: {
       input_tokens: outcome.inputTokens,
-      output_tokens: 0,
+      output_tokens: outcome.outputTokens,
       cost_usd: cost.costUsd,
       cost_source: cost.source,
       duration_ms: Math.round(outcome.latencyMs),

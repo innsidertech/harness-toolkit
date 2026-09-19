@@ -895,6 +895,7 @@ CONTROL
 
 MEASURE
   tlc harness obs live|events|report|prune
+  tlc harness obs jev [n] [--full]   every request sent to Jev and what came back, once trace is on
   tlc harness prices refresh [all|cursor|litellm]
   tlc harness prices lookup <model-id>
   tlc harness lessons list|show|garden|sync-rules

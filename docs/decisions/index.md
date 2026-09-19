@@ -156,6 +156,8 @@ Handoff section and a link back to this index.
 | [AD-146](/decisions/ad-146.md) | the untrusted-content judge asks about rewritten commands, over the network, and only ever asks | active |
 | [AD-147](/decisions/ad-147.md) | Claude Code's adapter dropped tool output for shell and MCP events, so enforce mode remembered nothing | active |
 | [AD-148](/decisions/ad-148.md) | Jev is asked about four of the harness's own judgement calls, beside the rule that already makes each, and changes none of them | active |
+| [AD-149](/decisions/ad-149.md) | An opt-in trace keeps every exchange with Jev, as sent and as answered, in a file of its own | active |
+| [AD-150](/decisions/ad-150.md) | The judge is sent the text a read returned rather than the host's envelope, skips the prompt question when the prompt states no task, counts output tokens, and records a fourth reading about consequence | active |
 
 ## Archived
 

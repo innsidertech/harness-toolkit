@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { machineHome } from "../../platform/paths.ts";
-import { askSystemOne, type SystemOneRequest, type SystemOneResult } from "../../platform/typesafe.ts";
+import {
+  askSystemOne,
+  type SystemOneAttempt,
+  type SystemOneRequest,
+  type SystemOneResult,
+} from "../../platform/typesafe.ts";
+import { type JevTraceTarget, traceExchange } from "./jev.trace.ts";
 
 /**
  * What every use of Jev shares: where the key comes from, and one wall-clock budget over a bounded fan-out.
@@ -10,7 +16,18 @@ import { askSystemOne, type SystemOneRequest, type SystemOneResult } from "../..
  * key and the budget out of the untrusted-content rail would make that rail a dependency of things that have
  * nothing to do with untrusted content ([/decisions/ad-148.md](/decisions/ad-148.md)).
  */
-export type JevTransport = { model: string; timeoutMs: number; concurrency: number };
+export type JevTransport = {
+  model: string;
+  timeoutMs: number;
+  concurrency: number;
+  /**
+   * Keep every exchange — the body sent and the answer as it arrived — in `state/jev-trace.jsonl`.
+   *
+   * hazard: off by default, because it is the only switch that puts the sent text on disk. The obs records stay
+   * numbers whatever this says ([/decisions/ad-149.md](/decisions/ad-149.md)).
+   */
+  trace: boolean;
+};
 
 /** why a file rather than the environment alone: measured — a hook inherits the host's environment, and no host
  * passes an arbitrary variable through, so an environment-only rule would ship a capability nobody could switch on.
@@ -44,9 +61,11 @@ export type AskFn = (
   request: SystemOneRequest,
   apiKey: string,
   timeoutMs: number,
+  observe?: (attempt: SystemOneAttempt) => void,
 ) => Promise<SystemOneResult>;
 
-export const liveAsk: AskFn = (request, apiKey, timeoutMs) => askSystemOne(request, { apiKey, timeoutMs });
+export const liveAsk: AskFn = (request, apiKey, timeoutMs, observe) =>
+  askSystemOne(request, { apiKey, timeoutMs, ...(observe ? { observe } : {}) });
 
 /**
  * invariant: at most `concurrency` requests outstanding. Eight 8,000-character entries at `concurrency` 8 are one
@@ -81,18 +100,40 @@ export function askWithinBudget(args: {
   ask: AskFn;
   now: () => number;
   started: number;
+  /** Where a trace goes and who is asking. Read only when `judge.trace` is on. */
+  trace?: JevTraceTarget;
 }): Promise<SystemOneResult[]> {
   const deadline = args.started + args.judge.timeoutMs;
-  return inWaves(args.requests, args.judge.concurrency, (request): Promise<SystemOneResult> => {
+  const target = args.judge.trace ? args.trace : undefined;
+  const indexed = args.requests.map((request, index) => ({ request, index }));
+  return inWaves(indexed, args.judge.concurrency, async ({ request, index }): Promise<SystemOneResult> => {
+    const attempts: SystemOneAttempt[] = [];
     const remaining = deadline - args.now();
-    if (remaining <= 0) {
-      return Promise.resolve({
-        ok: false,
-        category: "timeout",
-        detail: `run budget of ${args.judge.timeoutMs} ms spent before this request was sent`,
-        latencyMs: 0,
+    // why: a request the budget never let out is traced too, because "nothing was sent" is part of what happened.
+    const result: SystemOneResult =
+      remaining <= 0
+        ? {
+            ok: false,
+            category: "timeout",
+            detail: `run budget of ${args.judge.timeoutMs} ms spent before this request was sent`,
+            latencyMs: 0,
+          }
+        : await args.ask(
+            request,
+            args.key,
+            remaining,
+            target ? (attempt) => attempts.push(attempt) : undefined,
+          );
+    if (target) {
+      traceExchange(target, {
+        ts: new Date(args.now()).toISOString(),
+        index,
+        of: args.requests.length,
+        request,
+        attempts,
+        result,
       });
     }
-    return args.ask(request, args.key, remaining);
+    return result;
   });
 }

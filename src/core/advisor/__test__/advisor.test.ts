@@ -29,6 +29,7 @@ function answering(scores: number[]): { ask: AskFn; requests: SystemOneRequest[]
         answers: { answer: score },
         model: DEFAULT_JEV_ADVISOR.model,
         inputTokens: 50,
+        outputTokens: 20,
         latencyMs: 5,
       };
     },
@@ -138,6 +139,7 @@ test("C42 one unusable answer fails the whole call, so no caller ranks over a pa
           answers: { answer: 0.9 },
           model: DEFAULT_JEV_ADVISOR.model,
           inputTokens: 50,
+          outputTokens: 20,
           latencyMs: 5,
         };
   };
@@ -187,6 +189,7 @@ test("C42 one timeoutMs covers every wave", async () => {
       answers: { answer: 0.5 },
       model: DEFAULT_JEV_ADVISOR.model,
       inputTokens: 50,
+      outputTokens: 20,
       latencyMs: 400,
     };
   };

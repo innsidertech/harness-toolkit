@@ -392,7 +392,7 @@
         "response.after"
       ],
       "verdict": "ask",
-      "inspect": "tlc harness obs report \u2014 runs, asks, failures by category, latency and input tokens; tlc harness doctor reports it when enabled and inert or degraded",
+      "inspect": "tlc harness obs report \u2014 runs, asks, failures by category, latency and input tokens; tlc harness obs jev \u2014 every request sent and what came back, once `trace` is on; tlc harness doctor reports it when enabled and inert or degraded",
       "asks": [
         "mode: record | ask",
         "scope: command | edit | mcp | response",
@@ -416,7 +416,7 @@
         "tool.after"
       ],
       "verdict": "record",
-      "inspect": "tlc harness obs report \u2014 runs and failures by use; grep '\"rail\":\"jev-advisor\"' in obs.jsonl for each reading beside the rule's own answer; tlc harness doctor reports it when enabled and inert",
+      "inspect": "tlc harness obs report \u2014 runs and failures by use; grep '\"rail\":\"jev-advisor\"' in obs.jsonl for each reading beside the rule's own answer; tlc harness obs jev \u2014 every request sent and what came back, once `trace` is on; tlc harness doctor reports it when enabled and inert",
       "asks": [
         "lessonRank: off | record | apply",
         "shipClaim: off | record",

@@ -285,3 +285,42 @@ test("C20 a response answered by another version is returned with that version n
   assert.equal(result.model, "jev-1.14.0");
   assert.equal(result.answers.content_instructs_agent, 0.92);
 });
+
+test("an observer sees every HTTP answer as it arrived, a retried refusal included, and changes no result", async () => {
+  const bodies: [unknown, number][] = [
+    [{ error: "slow down" }, 429],
+    [OK_BODY, 200],
+  ];
+  const fetchImpl: FetchLike = async () => {
+    const [body, status] = bodies.shift() as [unknown, number];
+    return jsonResponse(body, status);
+  };
+  const seen: { status: number; body: unknown }[] = [];
+  const result = await askSystemOne(REQUEST, {
+    apiKey: "k",
+    timeoutMs: 2500,
+    fetchImpl,
+    sleep: async () => {},
+    observe: (attempt) => seen.push(attempt),
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(seen, [
+    { status: 429, body: { error: "slow down" } },
+    { status: 200, body: OK_BODY },
+  ]);
+});
+
+test("an observer is handed a refusal's body as text when it is not JSON", async () => {
+  const fetchImpl: FetchLike = async () => new Response("bad gateway", { status: 502 });
+  const seen: { status: number; body: unknown }[] = [];
+  const result = await askSystemOne(REQUEST, {
+    apiKey: "k",
+    timeoutMs: 2500,
+    fetchImpl,
+    observe: (attempt) => seen.push(attempt),
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(seen, [{ status: 502, body: "bad gateway" }]);
+});

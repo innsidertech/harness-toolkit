@@ -31,8 +31,8 @@ async function judgeResponse(event: HarnessEvent, ctx: HandlerContext, text: str
     sessionKey: event.sessionKey,
     model: outcome.readings[0]?.model ?? judge.model,
     attrs: coreFacade.untrusted.judgeObsAttrs(outcome, judge),
-    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, inputTokens) => {
-      const cost = estimateCostUsd("typesafe", model, { inputTokens });
+    gen_ai: coreFacade.untrusted.judgeGenAi(outcome, (model, usage) => {
+      const cost = estimateCostUsd("typesafe", model, usage);
       return { costUsd: cost.costUsd, source: cost.source };
     }),
   });

@@ -34,6 +34,7 @@ export const DEFAULT_JEV_ADVISOR: JevAdvisorConfig = {
   model: "jev-1.13.0",
   timeoutMs: 2500,
   concurrency: 8,
+  trace: false,
 };
 
 const MODE_FIELDS = ["lessonRank", "shipClaim", "commentNarration", "stagnation"] as const;
@@ -76,6 +77,9 @@ export function advisorConfigErrors(config: Partial<JevAdvisorConfig> | undefine
     return [];
   }
   const errors = [...modeErrors(config), ...numberErrors(config)];
+  if (config.trace !== undefined && typeof config.trace !== "boolean") {
+    errors.push(`intelligence.jev.trace must be true or false, got ${JSON.stringify(config.trace)}`);
+  }
   const model = config.model;
   if (
     model !== undefined &&

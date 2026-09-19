@@ -36,10 +36,13 @@ type JudgeReading = {
   source: string;
   instructs: number;
   follows: number;
-  /** Null when the session had no stored prompt, so the third question was not asked. */
+  /** Null when the session had no prompt that states a task, so the third question was not asked. */
   serves: number | null;
+  /** Null for a kind the question is not put to. Recorded, and routes nothing. */
+  consequential: number | null;
   model: string;
   inputTokens: number;
+  outputTokens: number;
   latencyMs: number;
   /** Whether the version that answered differs from the pin. */
   drift: boolean;
@@ -69,6 +72,7 @@ export type JudgeOutcome = {
   commandExcerpt: string;
   kind: JudgeActionKind;
   inputTokens: number;
+  outputTokens: number;
   latencyMs: number;
 };
 
@@ -82,6 +86,7 @@ const SKIPPED: JudgeOutcome = {
   commandExcerpt: "",
   kind: "command",
   inputTokens: 0,
+  outputTokens: 0,
   latencyMs: 0,
 };
 
@@ -137,7 +142,7 @@ export function requestFor(args: {
   task: JudgeTask;
 }): SystemOneRequest {
   const asked = questionsFor(args.kind);
-  const { instructs, follows, serves } = QUESTION_IDS;
+  const { instructs, follows, serves, consequential } = QUESTION_IDS;
   // why: with no stored prompt the third question is left out rather than sent against an empty field. An empty
   // field is state the question does not need, which is the accuracy loss this design is built around.
   // why: a chunk screened at the read already has its first answer, and asking again pays for a number that the
@@ -145,6 +150,7 @@ export function requestFor(args: {
   const questions: Record<string, NoulQuestion> = {
     ...(args.task.screened === undefined ? { [instructs]: instructsQuestion() } : {}),
     [follows]: asked.follows,
+    ...(asked.consequential === null ? {} : { [consequential]: asked.consequential }),
   };
   if (args.prompt !== null) {
     questions[serves] = asked.serves;
@@ -205,9 +211,21 @@ function diagnosticFor(reading: JudgeReading): string {
   return `${QUESTION_IDS.instructs}=${reading.instructs.toFixed(2)} ${QUESTION_IDS.follows}=${reading.follows.toFixed(2)} ${QUESTION_IDS.serves}=${serves} model=${reading.model}`;
 }
 
+/**
+ * why a floor: measured — a turn opened with `go` scored `command_serves_prompt` between 0.37 and 0.53 for every
+ * command, the one that obeyed the bait included. A prompt that states no task makes the question noise, and the
+ * request already has a shape for "no prompt": the question is left out.
+ */
+const MIN_TASK_PROMPT_CHARS = 16;
+
+function taskPrompt(prompt: string | null): string | null {
+  return prompt !== null && prompt.trim().length >= MIN_TASK_PROMPT_CHARS ? prompt : null;
+}
+
 type Collected = {
   readings: JudgeReading[];
   inputTokens: number;
+  outputTokens: number;
   failure?: { category: TypesafeErrorCategory; detail: string };
 };
 
@@ -219,25 +237,35 @@ function collect(
 ): Collected {
   const readings: JudgeReading[] = [];
   let inputTokens = 0;
+  let outputTokens = 0;
   for (const [index, result] of results.entries()) {
     if (!result.ok) {
-      return { readings, inputTokens, failure: { category: result.category, detail: result.detail } };
+      return {
+        readings,
+        inputTokens,
+        outputTokens,
+        failure: { category: result.category, detail: result.detail },
+      };
     }
     inputTokens += result.inputTokens;
+    outputTokens += result.outputTokens;
     const serves = result.answers[QUESTION_IDS.serves];
+    const consequential = result.answers[QUESTION_IDS.consequential];
     const task = tasks[index] as JudgeTask;
     readings.push({
       source: task.source,
       instructs: task.screened ?? result.answers[QUESTION_IDS.instructs] ?? 0,
       follows: result.answers[QUESTION_IDS.follows] ?? 0,
       serves: typeof serves === "number" ? serves : null,
+      consequential: typeof consequential === "number" ? consequential : null,
       model: result.model,
       inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
       latencyMs: result.latencyMs,
       drift: result.model !== pinnedModel,
     });
   }
-  return { readings, inputTokens };
+  return { readings, inputTokens, outputTokens };
 }
 
 /**
@@ -316,6 +344,7 @@ export async function judgeAction(args: {
       commandExcerpt: "",
       kind: args.kind,
       inputTokens: 0,
+      outputTokens: 0,
       latencyMs: now() - started,
     };
   }
@@ -325,7 +354,7 @@ export async function judgeAction(args: {
   const mask = (text: string): string =>
     maskSecrets(text, (matchedText, kind) => placeholderFor(args.root, args.sessionKey, matchedText, kind));
 
-  const prompt = readOperatorPrompt(args.root, args.sessionKey);
+  const prompt = taskPrompt(readOperatorPrompt(args.root, args.sessionKey));
   const every = tasksFor(recall, judge);
   // why: content that does not address an agent cannot clear whatever the command is, so a chunk the read-time
   // screen put below the first threshold is not asked about again. A session that only read ordinary pages then
@@ -354,11 +383,12 @@ export async function judgeAction(args: {
     ask,
     now,
     started,
+    trace: { root: args.root, sessionKey: args.sessionKey, caller: `judge:${args.kind}` },
   });
 
   const collected = collect(results, tasks, judge.model);
   const readings = collected.readings;
-  const inputTokens = collected.inputTokens;
+  const { inputTokens, outputTokens } = collected;
   if (collected.failure) {
     // invariant: one bad request collapses the whole run. A verdict computed from the entries that happened to
     // answer would report a judgement over a recall it did not see.
@@ -373,6 +403,7 @@ export async function judgeAction(args: {
       commandExcerpt,
       kind: args.kind,
       inputTokens,
+      outputTokens,
       latencyMs: now() - started,
     };
   }
@@ -386,6 +417,7 @@ export async function judgeAction(args: {
     commandExcerpt,
     kind: args.kind,
     inputTokens,
+    outputTokens,
     latencyMs: now() - started,
   };
   // why: the reading is used for the verdict whether or not the version drifted. Excluding it would mean a silent
@@ -415,6 +447,7 @@ export type ScreenOutcome = {
   failure?: { category: TypesafeErrorCategory; detail: string };
   requests: number;
   inputTokens: number;
+  outputTokens: number;
   latencyMs: number;
 };
 
@@ -426,6 +459,7 @@ const SCREEN_SKIPPED: ScreenOutcome = {
   drift: false,
   requests: 0,
   inputTokens: 0,
+  outputTokens: 0,
   latencyMs: 0,
 };
 
@@ -486,6 +520,7 @@ export async function screenUntrustedRead(args: {
     ask: args.ask ?? liveAsk,
     now,
     started,
+    trace: { root: args.root, sessionKey: args.sessionKey, caller: "judge:read" },
   });
   const collected = collect(results, tasks, judge.model);
   const base = {
@@ -494,6 +529,7 @@ export async function screenUntrustedRead(args: {
     drift: collected.readings.some((reading) => reading.drift),
     requests: results.length,
     inputTokens: collected.inputTokens,
+    outputTokens: collected.outputTokens,
   };
   if (collected.failure) {
     return {
@@ -546,14 +582,23 @@ export function screenObsAttrs(outcome: ScreenOutcome, judge: UntrustedJudgeConf
  * in this repository, so a hardcoded Jev rate is not available to this design.
  */
 export function judgeGenAi(
-  outcome: { readings?: JudgeReading[]; model?: string; inputTokens: number; latencyMs: number },
-  estimate: (model: string, inputTokens: number) => { costUsd: number | null; source: string },
+  outcome: {
+    readings?: JudgeReading[];
+    model?: string;
+    inputTokens: number;
+    outputTokens: number;
+    latencyMs: number;
+  },
+  estimate: (
+    model: string,
+    usage: { inputTokens: number; outputTokens: number },
+  ) => { costUsd: number | null; source: string },
 ): Record<string, unknown> {
   const answered = outcome.readings?.[0]?.model ?? outcome.model ?? "none";
-  const cost = estimate(answered, outcome.inputTokens);
+  const cost = estimate(answered, { inputTokens: outcome.inputTokens, outputTokens: outcome.outputTokens });
   return {
     input_tokens: outcome.inputTokens,
-    output_tokens: 0,
+    output_tokens: outcome.outputTokens,
     cost_usd: cost.costUsd,
     cost_source: cost.source,
     duration_ms: Math.round(outcome.latencyMs),
@@ -601,6 +646,7 @@ export function judgeObsAttrs(outcome: JudgeOutcome, judge: UntrustedJudgeConfig
     instructs: top?.instructs ?? null,
     follows: top?.follows ?? null,
     serves: top?.serves ?? null,
+    consequential: top?.consequential ?? null,
     category: outcome.failure?.category ?? "none",
     detail: outcome.failure?.detail ?? "none",
   };
