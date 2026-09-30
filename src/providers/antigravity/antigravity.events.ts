@@ -13,6 +13,14 @@ export const ANTIGRAVITY_TIMEOUT_SECONDS: Record<AntigravityHostEvent, number> =
   Stop: 120,
 };
 
+/**
+ * Events whose success is zero bytes on stdout; `bin/tlc-exec.mjs` repeats these tokens in `silentSuccessTokens`.
+ *
+ * why: on these two events the host reads any JSON as the tool's result or a verdict — measured on `agy` 1.2.14, an
+ * allow object after a tool replaced its result with `unknown field "decision"` ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+export const ANTIGRAVITY_SILENT_SUCCESS_EVENTS: readonly AntigravityHostEvent[] = ["PostToolUse", "Stop"];
+
 /** Returns the suffix only for an exact wired token; null for a bare, absent, or unknown token. */
 export function parseHostEvent(hostEvent: string | undefined): AntigravityHostEvent | null {
   if (hostEvent === undefined || !hostEvent.startsWith(ANTIGRAVITY_EVENT_PREFIX)) {

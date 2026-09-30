@@ -398,8 +398,10 @@ async function runResolved(
 
 export async function main(handler: Handler): Promise<void> {
   const outcome = await runHandler(handler);
-  if (outcome.rendered.stdout !== null) {
-    const text = outcome.rendered.stdout;
+  // invariant: an empty render means zero bytes. A lone newline is not silence to a host that reads silence as
+  // success ([/decisions/ad-156.md](/decisions/ad-156.md)).
+  const text = outcome.rendered.stdout;
+  if (text !== null && text !== "") {
     process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
   }
   process.exit(outcome.rendered.exitCode);

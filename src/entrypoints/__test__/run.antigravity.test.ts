@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -9,6 +10,7 @@ import { projectStateDir } from "../../platform/paths.ts";
 import { type ProviderPort, providers } from "../../providers/index.ts";
 import { composeProtectedPaths, type Handler, hostEventOf, runHandler } from "../run.ts";
 import { stopHandler } from "../stop.ts";
+import { toolAfterHandler } from "../tool-after.ts";
 import { toolBeforeHandler } from "../tool-before.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -182,24 +184,86 @@ test("AGH-06: a handler that throws is refused as handler-error and still record
   });
 });
 
-test("AGH-07: a translated call renders exactly one allow or deny object, never {} or empty", async () => {
+test("AGH-07: before a tool, each PreToolUse the real handler answers is exactly one allow or deny object", async () => {
   await inScene(async (scene) => {
-    for (const [token, pick] of [
-      ["antigravity:PreToolUse", (event: HarnessEvent) => event.event === "shell.before"],
-      ["antigravity:PostToolUse", (event: HarnessEvent) => event.event === "edit.after"],
-      ["antigravity:Stop", (event: HarnessEvent) => event.event === "stop"],
-    ] as const) {
+    for (const pick of [
+      (event: HarnessEvent) => event.event === "shell.before",
+      (event: HarnessEvent) => event.event === "read.before",
+      (event: HarnessEvent) => event.event === "tool.before",
+    ]) {
       const outcome = await runHandler(
         toolBeforeHandler,
-        io(scene, inWorkspace(fixtureWhere(token, pick), scene.root), token),
+        io(scene, inWorkspace(fixtureWhere("antigravity:PreToolUse", pick), scene.root)),
       );
       const stdout = outcome.rendered.stdout ?? "";
-      assert.notEqual(stdout.trim(), "");
+      assert.notEqual(stdout, "");
       assert.notEqual(stdout.trim(), "{}");
       const parsed = JSON.parse(stdout) as { decision: string };
-      assert.ok(parsed.decision === "allow" || parsed.decision === "deny", token);
+      assert.ok(parsed.decision === "allow" || parsed.decision === "deny", stdout);
       assert.equal(outcome.failure, undefined);
     }
+  });
+});
+
+test("AGH-07: after a tool and at Stop, the real handlers' success is zero bytes, never {} nor an allow object", async () => {
+  await inScene(async (scene) => {
+    const cases: [Handler, string, (event: HarnessEvent) => boolean][] = [
+      [toolAfterHandler, "antigravity:PostToolUse", (event) => event.event === "edit.after"],
+      [toolAfterHandler, "antigravity:PostToolUse", (event) => event.event === "shell.after"],
+      [toolAfterHandler, "antigravity:PostToolUse", (event) => event.event === "tool.after"],
+      [stopHandler, "antigravity:Stop", (event) => event.event === "stop"],
+    ];
+    for (const [handler, token, pick] of cases) {
+      const outcome = await runHandler(
+        handler,
+        io(scene, inWorkspace(fixtureWhere(token, pick), scene.root), token),
+      );
+      assert.equal(outcome.rendered.stdout, "", `${token}: ${JSON.stringify(outcome.rendered.stdout)}`);
+      assert.equal(outcome.rendered.exitCode, 0);
+      assert.equal(outcome.failure, undefined);
+    }
+  });
+});
+
+/** The entrypoint as the launcher runs it: its own process, the token in argv, the payload on stdin. */
+function runEntrypoint(entry: string, token: string, stdin: string, cwd: string) {
+  const result = spawnSync(process.execPath, [join(HERE, "..", `${entry}.ts`), token], {
+    cwd,
+    input: stdin,
+    env: { ...process.env, TLC_HOME: runtimeSandbox },
+  });
+  return { stdout: result.stdout ?? Buffer.alloc(0), status: result.status };
+}
+
+test("AGH-07: run as its own process, an empty render writes zero bytes and a PreToolUse still writes one object", async () => {
+  await inScene(async (scene) => {
+    const after = inWorkspace(
+      fixtureWhere("antigravity:PostToolUse", (event) => event.event === "tool.after"),
+      scene.root,
+    );
+    const post = runEntrypoint("tool-after", "antigravity:PostToolUse", after, scene.cwd);
+    assert.equal(post.status, 0);
+    assert.equal(post.stdout.length, 0, `tool-after wrote ${JSON.stringify(post.stdout.toString())}`);
+
+    const stop = runEntrypoint(
+      "stop",
+      "antigravity:Stop",
+      inWorkspace(
+        fixtureWhere("antigravity:Stop", (event) => event.event === "stop"),
+        scene.root,
+      ),
+      scene.cwd,
+    );
+    assert.equal(stop.status, 0);
+    assert.equal(stop.stdout.length, 0, `stop wrote ${JSON.stringify(stop.stdout.toString())}`);
+
+    const before = inWorkspace(
+      fixtureWhere("antigravity:PreToolUse", (event) => event.event === "read.before"),
+      scene.root,
+    );
+    const pre = runEntrypoint("tool-before", "antigravity:PreToolUse", before, scene.cwd);
+    assert.equal(pre.status, 0);
+    assert.equal(pre.stdout.toString(), '{"decision":"allow"}\n');
   });
 });
 
@@ -303,8 +367,8 @@ test("AGH-78: two identical Stops each run the stop handler to the end, with no 
     const second = await runHandler(counted, io(scene, text, "antigravity:Stop"));
     assert.equal(runs, 2);
     assert.deepEqual(scene.stderr, []);
-    assert.equal(first.rendered.stdout, '{"decision":"allow"}');
-    assert.equal(second.rendered.stdout, '{"decision":"allow"}');
+    assert.equal(first.rendered.stdout, "");
+    assert.equal(second.rendered.stdout, "");
     assert.equal(first.failure, undefined);
     assert.equal(second.failure, undefined);
   });
