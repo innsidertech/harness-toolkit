@@ -1,8 +1,19 @@
 import type { Decision } from "../../contracts/decision.ts";
+import { executedTexts, type PosixExecutors } from "./floor.exec-text.ts";
+import { type Head, segmentHeads } from "./floor.head.ts";
+import { firstName } from "./floor.name.ts";
 import { isInside, isProtectedWiringTarget, isScratch, isSecretPath, resolveTarget } from "./floor.paths.ts";
 import { checkPolicySurface } from "./floor.policy-surface.ts";
 import { type ShellSegment, type ShellWord, tokenizeShell } from "./floor.tokenize.ts";
-import { verbOf } from "./floor.verb.ts";
+import { type SegmentHead, verbOf } from "./floor.verb.ts";
+import {
+  TEXT_EXECUTING_VERBS,
+  VOLUME_VERBS,
+  WINDOWS_DESTRUCTIVE_VERBS,
+  WINDOWS_FETCH_VERBS,
+  WINDOWS_MACHINE_VERBS,
+  WINDOWS_READER_VERBS,
+} from "./floor.verbs.ts";
 
 export type FloorRule =
   | "machine-control"
@@ -165,6 +176,280 @@ function forcedGitPush(segment: ShellSegment): boolean {
   );
 }
 
+/** What the per-segment checks need besides the segment: where relative operands resolve, and what is protected. */
+type ShellContext = { projectDir: string; base: string; protectedPaths: readonly string[] };
+
+function isDestructiveName(name: string): boolean {
+  return DESTRUCTIVE_VERBS.has(name) || WINDOWS_DESTRUCTIVE_VERBS.has(name) || isMkfs(name);
+}
+
+function isMachineName(name: string): boolean {
+  return MACHINE_VERBS.has(name) || WINDOWS_MACHINE_VERBS.has(name);
+}
+
+function isHiddenDangerName(name: string): boolean {
+  return isDestructiveName(name) || isMachineName(name) || VOLUME_VERBS.has(name);
+}
+
+function isFetchName(name: string): boolean {
+  return FETCH_VERBS.has(name) || WINDOWS_FETCH_VERBS.has(name);
+}
+
+function fetchedTextDenial(): Decision {
+  return denial(
+    "unprovable-execution",
+    "This runs a program fetched over the network, which does not exist for this gate to check. Download it to a file, read it, then run that file.",
+    "fetched program handed to Invoke-Expression",
+  );
+}
+
+function hiddenDestructionDenial(): Decision {
+  return denial(
+    "unprovable-destruction",
+    "A destructive verb appears inside a command this gate cannot expand, so its target cannot be established. Run it directly with a literal path instead.",
+    "hidden destructive verb",
+  );
+}
+
+function pipedFromFetch(segments: readonly ShellSegment[], index: number): boolean {
+  for (let at = index - 1; at >= 0 && segments[at]?.separator === "|"; at -= 1) {
+    if (segmentHeads((segments[at] as ShellSegment).words).some((head) => isFetchName(head.name))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function argumentFetches(words: readonly ShellWord[], head: Head): boolean {
+  const word = (words[head.index] as ShellWord).text;
+  const open = word.indexOf("(");
+  const rest = open >= 0 ? [word.slice(open + 1)] : [];
+  return [...rest, ...words.slice(head.index + 1).map((next) => next.text)].some((text) =>
+    isFetchName(firstName(text)),
+  );
+}
+
+// why: an `&` at depth zero splits `iex (& irm …)` into `iex (` and `irm …)`, so the fetch sits in the next segment.
+function splitFetches(segments: readonly ShellSegment[], index: number): boolean {
+  const words = (segments[index] as ShellSegment).words;
+  const next = segments[index + 1];
+  return (
+    words[words.length - 1]?.text.endsWith("(") === true &&
+    next !== undefined &&
+    segmentHeads(next.words).some((head) => isFetchName(head.name))
+  );
+}
+
+/**
+ * A download handed to `Invoke-Expression`: piped from a fetch, fetched inside its argument, or split off by `&`.
+ *
+ * invariant: read through the Windows fetch names composed next to `FETCH_VERBS`, never into it, so
+ * `fetchedProgramReachesShell` and the metadata check keep the list they had ([/decisions/ad-157.md](/decisions/ad-157.md)).
+ */
+function fetchReachesExpression(segments: readonly ShellSegment[], index: number): boolean {
+  const segment = segments[index] as ShellSegment;
+  const expressions = segmentHeads(segment.words).filter((head) => TEXT_EXECUTING_VERBS.has(head.name));
+  if (expressions.length === 0) {
+    return false;
+  }
+  return (
+    pipedFromFetch(segments, index) ||
+    expressions.some((head) => argumentFetches(segment.words, head)) ||
+    splitFetches(segments, index)
+  );
+}
+
+const MAX_TEXT_DEPTH = 4;
+const POSIX_EXECUTORS: PosixExecutors = { shells: SHELLS, expanding: EXPANDING_VERBS };
+
+function subSegmentsDenial(segments: readonly ShellSegment[], level: number): Decision | null {
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index] as ShellSegment;
+    const heads = segmentHeads(segment.words);
+    if (heads.some((head) => isHiddenDangerName(head.name))) {
+      return hiddenDestructionDenial();
+    }
+    if (fetchReachesExpression(segments, index)) {
+      return fetchedTextDenial();
+    }
+    const nested = textExecutionDenial(segment, heads, level + 1);
+    if (nested !== null) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+/**
+ * hazard: `bash -c` was the only way through a string the floor could see, so `powershell -Command`, `cmd /c`,
+ * `iex`, a script block or a subexpression ran any destructive verb unexamined. Each executed text is split like a
+ * command and its heads compared, never its substrings, so `cmd /c "echo del"` stays allowed.
+ *
+ * invariant: `level` is the depth of the texts this segment hands on; past four the floor refuses rather than
+ * recursing without end.
+ */
+function textExecutionDenial(segment: ShellSegment, heads: readonly Head[], level: number): Decision | null {
+  const { texts, undecodable } = executedTexts(segment, heads, POSIX_EXECUTORS);
+  if (undecodable) {
+    return denial(
+      "unprovable-destruction",
+      "An encoded PowerShell command does not decode, so what it would run cannot be established. Pass the command as plain text.",
+      "undecodable encoded command",
+    );
+  }
+  if (texts.length > 0 && level > MAX_TEXT_DEPTH) {
+    return denial(
+      "unprovable-destruction",
+      "Commands nested more than four levels deep cannot be followed, so what they would run cannot be established. Run the inner command directly.",
+      "command nested too deep",
+    );
+  }
+  for (const text of texts) {
+    const nested = subSegmentsDenial(tokenizeShell(text), level);
+    if (nested !== null) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+// why: checked before `verbOf` resolves anything — a wrapper this gate does not recognize can delay which word
+// `verbOf` treats as the head, or exhaust the segment before a head is ever found, but it cannot remove
+// `git`/`push`/`--force` from the segment's own words.
+function historyDenial(segment: ShellSegment): Decision | null {
+  if (!forcedGitPush(segment)) {
+    return null;
+  }
+  return denial(
+    "history-rewrite",
+    "`git push --force` discards remote commits that are not in your history. Use --force-with-lease, which refuses when the remote moved.",
+    "force push",
+  );
+}
+
+// hazard: `eval "rm -rf /"` and `bash -c "rm -rf /"` build their command at runtime, so the head word does not
+// describe what will run. Reasoning about the nested quoting is the weak-parser trap — refuse the segment instead
+// of interpreting it. Scanning words is only sound here: doing it for any opaque segment flags an `rm` quoted as
+// data somewhere in a long script.
+function runtimeBuiltDenial(segment: ShellSegment, head: SegmentHead | null): Decision | null {
+  return head !== null && buildsCommandAtRuntime(head.verb, head.args) && hidesDestructiveVerb(segment)
+    ? hiddenDestructionDenial()
+    : null;
+}
+
+function executionDenial(
+  segments: readonly ShellSegment[],
+  index: number,
+  heads: readonly Head[],
+): Decision | null {
+  if (fetchReachesExpression(segments, index)) {
+    return fetchedTextDenial();
+  }
+  return textExecutionDenial(segments[index] as ShellSegment, heads, 1);
+}
+
+function machineDenial(head: SegmentHead | null, heads: readonly Head[]): Decision | null {
+  const verb =
+    head !== null && MACHINE_VERBS.has(head.verb)
+      ? head.verb
+      : heads.find((candidate) => isMachineName(candidate.name))?.name;
+  return verb === undefined
+    ? null
+    : denial("machine-control", `\`${verb}\` controls the machine, not the project.`, verb);
+}
+
+function volumeDenial(heads: readonly Head[]): Decision | null {
+  const verb = heads.find((candidate) => VOLUME_VERBS.has(candidate.name))?.name;
+  return verb === undefined
+    ? null
+    : denial(
+        "outside-project-destruction",
+        `\`${verb}\` formats or clears a volume or a disk, which is outside the project whatever its arguments.`,
+        `${verb} of a volume`,
+      );
+}
+
+function targetDenial(verb: string, word: ShellWord, ctx: ShellContext): Decision | null {
+  const resolved = resolveTarget(ctx.base, word.text);
+  // why: a destructive verb targeting a provider's wiring path is the same tampering the redirect and in-place-edit
+  // cases already name — attributing it to `outside-project-destruction` instead would be technically safe (the
+  // file still cannot be destroyed) but would hide which rule actually did the work.
+  if (isProtectedWiringTarget(resolved, ctx.protectedPaths)) {
+    return denial(
+      "wiring-tamper",
+      `${resolved} is where a provider reads its own hook registration from, and destroying it would stop every hook this harness has for that host from firing.`,
+      `${verb} of ${resolved}`,
+    );
+  }
+  if (!isInside(ctx.projectDir, resolved) && !isScratch(resolved)) {
+    return denial(
+      "outside-project-destruction",
+      `\`${verb}\` targets ${resolved}, which is outside the project and outside scratch space.`,
+      `${verb} outside project`,
+    );
+  }
+  return null;
+}
+
+function destructionDenial(
+  segment: ShellSegment,
+  verb: string,
+  targets: readonly ShellWord[],
+  ctx: ShellContext,
+): Decision | null {
+  // hazard: an opaque segment or an unresolved word means the target is unknown. The floor must prove the target
+  // is safe, not prove it is dangerous, so unknown resolves to denied.
+  if (segment.opaque || targets.some((word) => word.unresolved) || targets.length === 0) {
+    return denial(
+      "unprovable-destruction",
+      `\`${verb}\` was called with a target this gate cannot resolve, so its safety cannot be established. Re-run it with a literal path inside the project.`,
+      `unresolvable ${verb}`,
+    );
+  }
+  for (const word of targets) {
+    const found = targetDenial(verb, word, ctx);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
+}
+
+function destructiveHeadsDenial(
+  segment: ShellSegment,
+  head: SegmentHead | null,
+  heads: readonly Head[],
+  ctx: ShellContext,
+): Decision | null {
+  if (head !== null && (DESTRUCTIVE_VERBS.has(head.verb) || isMkfs(head.verb))) {
+    const found = destructionDenial(segment, head.verb, pathArgs(head.args), ctx);
+    if (found !== null) {
+      return found;
+    }
+  }
+  for (const candidate of heads.filter((each) => isDestructiveName(each.name))) {
+    const found = destructionDenial(segment, candidate.name, candidate.operands, ctx);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
+}
+
+function segmentDenial(segments: readonly ShellSegment[], index: number, ctx: ShellContext): Decision | null {
+  const segment = segments[index] as ShellSegment;
+  const head = verbOf(segment.words);
+  const heads = segmentHeads(segment.words);
+  return (
+    historyDenial(segment) ??
+    runtimeBuiltDenial(segment, head) ??
+    executionDenial(segments, index, heads) ??
+    machineDenial(head, heads) ??
+    volumeDenial(heads) ??
+    destructiveHeadsDenial(segment, head, heads, ctx)
+  );
+}
+
 function checkShell(input: FloorInput): Decision {
   const command = input.command;
   if (!command) {
@@ -173,6 +458,7 @@ function checkShell(input: FloorInput): Decision {
 
   const segments = tokenizeShell(command);
   const protectedPaths = input.protectedPaths ?? [];
+  const ctx: ShellContext = { projectDir: input.projectDir, base: input.projectDir, protectedPaths };
 
   // invariant: asked before the rest. A fetched program satisfies every other rule by containing nothing this
   // gate can read, so checking the wrapper first and the payload never is the order that let it through.
@@ -184,76 +470,10 @@ function checkShell(input: FloorInput): Decision {
     );
   }
 
-  for (const segment of segments) {
-    // why: checked before `verbOf` resolves anything — a wrapper this gate does not recognize can delay
-    // which word `verbOf` treats as the head, or exhaust the segment before a head is ever found, but it
-    // cannot remove `git`/`push`/`--force` from the segment's own words.
-    if (forcedGitPush(segment)) {
-      return denial(
-        "history-rewrite",
-        "`git push --force` discards remote commits that are not in your history. Use --force-with-lease, which refuses when the remote moved.",
-        "force push",
-      );
-    }
-
-    const head = verbOf(segment.words);
-    if (!head) {
-      continue;
-    }
-    const { verb, args } = head;
-
-    // hazard: `eval "rm -rf /"` and `bash -c "rm -rf /"` build their command at runtime, so the head
-    // word does not describe what will run. Reasoning about the nested quoting is the weak-parser
-    // trap — refuse the segment instead of interpreting it. Scanning words is only sound here: doing
-    // it for any opaque segment flags an `rm` quoted as data somewhere in a long script.
-    if (buildsCommandAtRuntime(verb, args) && hidesDestructiveVerb(segment)) {
-      return denial(
-        "unprovable-destruction",
-        "A destructive verb appears inside a command this gate cannot expand, so its target cannot be established. Run it directly with a literal path instead.",
-        "hidden destructive verb",
-      );
-    }
-
-    if (MACHINE_VERBS.has(verb)) {
-      return denial("machine-control", `\`${verb}\` controls the machine, not the project.`, verb);
-    }
-
-    const destructive = DESTRUCTIVE_VERBS.has(verb) || isMkfs(verb);
-    if (!destructive) {
-      continue;
-    }
-
-    const targets = pathArgs(args);
-
-    // hazard: an opaque segment or an unresolved word means the target is unknown. The floor must
-    // prove the target is safe, not prove it is dangerous, so unknown resolves to denied.
-    if (segment.opaque || targets.some((word) => word.unresolved) || targets.length === 0) {
-      return denial(
-        "unprovable-destruction",
-        `\`${verb}\` was called with a target this gate cannot resolve, so its safety cannot be established. Re-run it with a literal path inside the project.`,
-        `unresolvable ${verb}`,
-      );
-    }
-
-    for (const word of targets) {
-      const resolved = resolveTarget(input.projectDir, word.text);
-      // why: a destructive verb targeting a provider's wiring path is the same tampering the redirect and
-      // in-place-edit cases already name — attributing it to `outside-project-destruction` instead would be
-      // technically safe (the file still cannot be destroyed) but would hide which rule actually did the work.
-      if (isProtectedWiringTarget(resolved, protectedPaths)) {
-        return denial(
-          "wiring-tamper",
-          `${resolved} is where a provider reads its own hook registration from, and destroying it would stop every hook this harness has for that host from firing.`,
-          `${verb} of ${resolved}`,
-        );
-      }
-      if (!isInside(input.projectDir, resolved) && !isScratch(resolved)) {
-        return denial(
-          "outside-project-destruction",
-          `\`${verb}\` targets ${resolved}, which is outside the project and outside scratch space.`,
-          `${verb} outside project`,
-        );
-      }
+  for (let index = 0; index < segments.length; index += 1) {
+    const found = segmentDenial(segments, index, ctx);
+    if (found !== null) {
+      return found;
     }
   }
 
@@ -276,41 +496,69 @@ function checkShell(input: FloorInput): Decision {
     return denial(rule, `${surface.detail} ${remedy}`, surface.note);
   }
 
-  return checkShellSecrets(segments, input.projectDir);
+  return checkShellSecrets(segments, ctx.base);
 }
 
-function checkShellSecrets(segments: ShellSegment[], projectDir: string): Decision {
+function metadataDenial(head: SegmentHead): Decision | null {
+  if (!NETWORK_VERBS.has(head.verb)) {
+    return null;
+  }
+  const target = head.args.map((word) => word.text).join(" ");
+  const endpoint = METADATA_HOSTS.find((host) => target.includes(host));
+  return endpoint === undefined
+    ? null
+    : denial(
+        "secret-access",
+        `${endpoint} is the instance metadata service, and \`${head.verb}\` would copy the credentials it returns into the transcript.`,
+        `read of ${endpoint}`,
+      );
+}
+
+function readerDenial(verb: string, operands: readonly ShellWord[], base: string): Decision | null {
+  for (const word of operands) {
+    if (word.unresolved) {
+      continue;
+    }
+    const resolved = resolveTarget(base, word.text);
+    if (isSecretPath(resolved)) {
+      return denial(
+        "secret-access",
+        `\`${verb}\` would read ${resolved} into the transcript. Credentials do not belong in an agent's context.`,
+        `read of ${resolved}`,
+      );
+    }
+  }
+  return null;
+}
+
+function rawSecretDenial(segment: ShellSegment, base: string): Decision | null {
+  const head = verbOf(segment.words);
+  if (!head) {
+    return null;
+  }
+  return (
+    metadataDenial(head) ??
+    (READER_VERBS.has(head.verb) ? readerDenial(head.verb, pathArgs(head.args), base) : null)
+  );
+}
+
+function headSecretDenial(segment: ShellSegment, base: string): Decision | null {
+  for (const head of segmentHeads(segment.words)) {
+    if (READER_VERBS.has(head.name) || WINDOWS_READER_VERBS.has(head.name)) {
+      const found = readerDenial(head.name, head.operands, base);
+      if (found !== null) {
+        return found;
+      }
+    }
+  }
+  return null;
+}
+
+function checkShellSecrets(segments: ShellSegment[], base: string): Decision {
   for (const segment of segments) {
-    const head = verbOf(segment.words);
-    if (!head) {
-      continue;
-    }
-    if (NETWORK_VERBS.has(head.verb)) {
-      const target = head.args.map((word) => word.text).join(" ");
-      const endpoint = METADATA_HOSTS.find((host) => target.includes(host));
-      if (endpoint !== undefined) {
-        return denial(
-          "secret-access",
-          `${endpoint} is the instance metadata service, and \`${head.verb}\` would copy the credentials it returns into the transcript.`,
-          `read of ${endpoint}`,
-        );
-      }
-    }
-    if (!READER_VERBS.has(head.verb)) {
-      continue;
-    }
-    for (const word of pathArgs(head.args)) {
-      if (word.unresolved) {
-        continue;
-      }
-      const resolved = resolveTarget(projectDir, word.text);
-      if (isSecretPath(resolved)) {
-        return denial(
-          "secret-access",
-          `\`${head.verb}\` would read ${resolved} into the transcript. Credentials do not belong in an agent's context.`,
-          `read of ${resolved}`,
-        );
-      }
+    const found = rawSecretDenial(segment, base) ?? headSecretDenial(segment, base);
+    if (found !== null) {
+      return found;
     }
   }
   return { kind: "allow" };

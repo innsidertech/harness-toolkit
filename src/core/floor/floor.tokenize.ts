@@ -17,6 +17,11 @@ export type ShellSegment = {
    * policy question and belongs to the caller — this only reports failures of splitting.
    */
   opaque: boolean;
+  /**
+   * The separator text that ended the segment (`;`, `|`, `||`, `&`, `&&`, a newline); absent for the last one.
+   * why: only a single `|` joins a pipeline, and the split alone cannot tell `a | b` from `a; b`.
+   */
+  separator?: string;
 };
 
 const SEPARATORS = new Set([";", "|", "&", "\n"]);
@@ -97,10 +102,15 @@ export function tokenizeShell(command: string): ShellSegment[] {
     currentStartedQuoted = false;
   }
 
-  function pushSegment(): void {
+  function pushSegment(separator?: string): void {
     pushWord();
+    const previous = segments[segments.length - 1];
     if (words.length > 0) {
-      segments.push({ words, opaque: unbalanced });
+      segments.push(
+        separator === undefined ? { words, opaque: unbalanced } : { words, opaque: unbalanced, separator },
+      );
+    } else if (separator !== undefined && previous?.separator !== undefined) {
+      previous.separator += separator;
     }
     words = [];
   }
@@ -156,7 +166,7 @@ export function tokenizeShell(command: string): ShellSegment[] {
     }
 
     if (depth === 0 && SEPARATORS.has(char)) {
-      pushSegment();
+      pushSegment(char);
       continue;
     }
 
