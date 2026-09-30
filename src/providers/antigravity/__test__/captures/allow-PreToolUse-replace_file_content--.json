@@ -1,0 +1,34 @@
+{
+  "mode": "allow",
+  "eventArg": "PreToolUse",
+  "why": "end",
+  "cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\.agents",
+  "argvTail": [
+    "PreToolUse"
+  ],
+  "stdin": {
+    "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+    "conversationId": "<id>",
+    "modelName": "gemini-3.8-flash-high",
+    "stepIdx": 6,
+    "toolCall": {
+      "args": {
+        "AllowMultiple": false,
+        "Description": "Change capture-line-one to capture-line-two",
+        "EndLine": 1,
+        "Instruction": "Replace capture-line-one with capture-line-two",
+        "ReplacementContent": "capture-line-two",
+        "StartLine": 1,
+        "TargetContent": "capture-line-one",
+        "TargetFile": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\note.txt",
+        "toolAction": "Replacing text in note.txt",
+        "toolSummary": "Replace file content"
+      },
+      "name": "replace_file_content"
+    },
+    "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+    ]
+  }
+}

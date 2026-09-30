@@ -1,0 +1,33 @@
+{
+  "mode": "allow",
+  "eventArg": "PostToolUse",
+  "why": "end",
+  "cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\.agents",
+  "argvTail": [
+    "PostToolUse"
+  ],
+  "stdin": {
+    "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+    "conversationId": "<id>",
+    "error": "",
+    "modelName": "gemini-3.8-flash-high",
+    "stepIdx": 10,
+    "toolCall": {
+      "args": {
+        "description": "A probe subagent to perform probes.",
+        "enable_mcp_tools": false,
+        "enable_subagent_tools": false,
+        "enable_write_tools": false,
+        "name": "probe",
+        "system_prompt": "You are a probe subagent. Complete the task and report back.",
+        "toolAction": "Defining probe subagent",
+        "toolSummary": "Define probe subagent"
+      },
+      "name": "define_subagent"
+    },
+    "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+    ]
+  }
+}
