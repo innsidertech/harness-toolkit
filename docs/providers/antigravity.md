@@ -128,7 +128,7 @@ Code. Under an `antigravity:` token, every harness failure is an explicit refusa
 
 | Cause | Output |
 | --- | --- |
-| the launcher's runtime cannot run, the child does not start, exits non-zero or ends without a verdict | `{"decision":"deny","reason":"tlc-harness: launcher-error"}` |
+| the launcher's runtime cannot run, the child does not start, exits non-zero or ends without an output the event accepts | `{"decision":"deny","reason":"tlc-harness: launcher-error"}` |
 | the child does not finish two seconds before the host's timeout (8 s, 8 s, 118 s) | `{"decision":"deny","reason":"tlc-harness: timeout"}` |
 | stdin is empty, blank or not JSON | `{"decision":"deny","reason":"tlc-harness: invalid-stdin"}` |
 | valid JSON that no provider detects, another provider detects, or this adapter does not translate | `{"decision":"deny","reason":"tlc-harness: unrecognized-payload"}` |
@@ -138,12 +138,22 @@ The reason never carries a path, an environment value or parse detail. The detai
 diagnostic reaches disk only under the payload's `workspacePaths[0]`, never under the hook's working
 directory. Cursor and Claude Code keep their fail-open behaviour.
 
-A decision the harness did make renders as follows. Abstain renders `{"decision":"allow"}`, because empty
-stdout already means allow on this host and there is no neutral output; the provider conformance test
-"abstain never renders anything that reads as an approval" matches the other hosts' approval keys and does not
-catch this shape. `allow`, `context`, `continue` and a rewritten output also render `{"decision":"allow"}`.
-`deny`, and the `ask` and rewritten input this host has no channel for, render a deny carrying the reason.
-`{}` and empty stdout are never produced.
+A decision the harness did make renders by event:
+
+| Decision | `PreToolUse` | `PostToolUse` and `Stop` |
+| --- | --- | --- |
+| `abstain`, `allow`, `context`, `continue`, rewritten output | `{"decision":"allow"}` | empty stdout (zero bytes), exit 0 |
+| `deny`, and the `ask` and rewritten input this host has no channel for | a deny carrying the reason | a deny carrying the reason |
+
+Before a tool, abstain renders `{"decision":"allow"}`, because empty stdout already means allow there and there
+is no neutral output; the provider conformance test "abstain never renders anything that reads as an approval"
+matches the other hosts' approval keys and does not catch this shape. After a tool and at `Stop`, the host reads
+any JSON as the tool's result or a verdict: measured on `agy` 1.2.14, `{"decision":"allow"}` after a tool
+replaced the tool's result with `unknown field "decision"`. Success there is therefore empty stdout, which opens
+nothing — the floor refuses before the tool, and the after-event arrives once the tool has run. `{}` is never
+produced on any event, `{"decision":"allow"}` is never produced after a tool or at `Stop`, and empty stdout is
+never produced before a tool. A hook child that exits 0 with empty stdout is success after a tool and at `Stop`,
+and a `launcher-error` before a tool.
 
 ## Recovery
 

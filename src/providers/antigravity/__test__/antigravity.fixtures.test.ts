@@ -108,6 +108,9 @@ test("AGH-53: PROVENANCE records the source, both redaction rules and the two no
     "the stdin the hook received, not the stdout the hook wrote",
     "Q3",
     "keeps only the last occurrence",
+    "The stdin captures are from `agy` 1.2.13",
+    "measured on `agy` 1.2.14, print mode, the CLI's default model, on 2026-09-30",
+    "AD-048",
   ]) {
     assert.ok(PROVENANCE.includes(needle), `PROVENANCE.md lacks: ${needle}`);
   }

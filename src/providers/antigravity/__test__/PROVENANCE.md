@@ -9,6 +9,9 @@
 - Origin: `.specs/features/tlc-harness-antigravity/captures/` in the agentic-squad repository. Each capture file holds
   the capture hook's own bookkeeping (`mode`, `eventArg`, `why`, `cwd`, `argvTail`) and, under `stdin`, the payload
   the host sent. A fixture here is that `stdin` object.
+- The stdin captures are from `agy` 1.2.13. The success output of `PostToolUse` and `Stop` (empty stdout, exit 0) was
+  measured on `agy` 1.2.14, print mode, the CLI's default model, on 2026-09-30, recorded as decision AD-048 of the
+  agentic-squad repository (not this repository's `ad-048.md`).
 
 ## Redaction
 
@@ -59,9 +62,11 @@ The host's response table comes from the discovery's Q3 (response mode → effec
 | `golden/allow.json` | `{"decision":"allow"}` | `allow` → the tool runs | `allow-PostToolUse-*` exist: the tool ran and its after-event fired |
 | `golden/deny.json` | `{"decision":"deny","reason":"<reason>"}` | `deny` → the tool is refused | `deny-PreToolUse-view_file--.json` exists and no `deny-PostToolUse-*` does: the tool never ran |
 
-The same table is why `{}` and an empty stdout are forbidden outputs on this host: `-PreToolUse-view_file--.json`
+The same table is why `{}` and an empty stdout are forbidden outputs on `PreToolUse`: `-PreToolUse-view_file--.json`
 (the `{}` mode) shows `{}` refusing the tool, and `empty-PostToolUse-view_file--.json` shows an empty stdout letting it
-run.
+run. `golden/allow.json` is therefore the success output on `PreToolUse` only. On `PostToolUse` and `Stop` the success
+output is empty stdout, from the 1.2.14 measurement above: there `{"decision":"allow"}` replaced the tool's result with
+`unknown field "decision"`, and `{}` is still forbidden because it refuses the tool on `PreToolUse`.
 
 ## Notes
 
