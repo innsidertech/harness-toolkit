@@ -88,6 +88,18 @@ describe("runBoundaryChecks — seeded violations", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  test("fails when the antigravity or gemini vendor name appears in src/core/ or src/contracts/", () => {
+    const root = fixtureRoot();
+    write(root, "src/core/gate/gate.service.ts", "// antigravity renders deny\nexport const A = 1;\n");
+    write(root, "src/contracts/host.ts", "export const B = 1;\n// gemini config dir\n");
+    const violations = checks(root).filter((v) => v.rule === "vendor-identifier-in-core");
+    assert.deepEqual(violations.map((v) => [normalizeSeparators(v.file), v.line]).sort(), [
+      ["src/contracts/host.ts", 2],
+      ["src/core/gate/gate.service.ts", 1],
+    ]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("fails when process.env.HOME appears in a scanned tree", () => {
     const root = fixtureRoot();
     write(
