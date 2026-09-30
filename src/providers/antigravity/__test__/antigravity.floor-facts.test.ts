@@ -106,11 +106,12 @@ test("the canonical form is offered only for run_command on Windows, and expands
   const deps = {
     platform: "win32" as const,
     home: "C:\\Users\\dev",
-    exists: (path: string) => ["C:\\", "C:\\Users", "C:\\Users\\DEV~1"].includes(path),
-    realpath: (path: string) => (path === "C:\\Users\\DEV~1" ? "C:\\Users\\dev" : path),
+    exists: (path: string) =>
+      ["C:\\", "C:\\Users", "C:\\Users\\dev", "C:\\Users\\dev\\GEMINI~1"].includes(path),
+    realpath: (path: string) => (path === "C:\\Users\\dev\\GEMINI~1" ? "C:\\Users\\dev\\.gemini" : path),
   };
   const shell = antigravityFloorHostFacts(event("shell.before", { projectDir: "C:\\w" }), TARGETS, deps);
-  assert.equal(shell.canonical?.("C:\\Users\\DEV~1\\.gemini\\config"), "C:\\Users\\dev\\.gemini\\config");
+  assert.equal(shell.canonical?.("C:\\Users\\dev\\GEMINI~1\\config"), "C:\\Users\\dev\\.gemini\\config");
   const write = antigravityFloorHostFacts(event("tool.before", { projectDir: "C:\\w" }), TARGETS, deps);
   assert.equal(write.canonical, undefined);
   const posix = antigravityFloorHostFacts(event("shell.before"), TARGETS, { ...deps, platform: "linux" });
