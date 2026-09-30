@@ -1,5 +1,6 @@
 import type {
   Decision,
+  FloorHostFacts,
   HarnessEvent,
   ProviderCapabilities,
   ProviderPolicyDefaults,
@@ -43,5 +44,7 @@ export type ProviderPort = {
     event: HarnessEvent,
     protectedPaths: readonly string[],
   ): { filePath: string; protectedPaths: string[] } | null;
+  /** What the floor needs about this host to judge wiring routes; absent or null means the floor judges with the project directory alone. Throws when a path cannot be resolved. */
+  floorHostFacts?(event: HarnessEvent, protectedPaths: readonly string[]): FloorHostFacts | null;
   lessonsView(root: string): string | null;
 };

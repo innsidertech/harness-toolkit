@@ -49,6 +49,41 @@ export function isProtectedWiringTarget(target: string, protectedPaths: readonly
   return protectedPaths.some((path) => isInside(resolve(path), resolved));
 }
 
+/** How a host compares a path with its protected targets: without case, and through its alias-free form. */
+export type WiringMatch = {
+  foldCase: boolean;
+  canonical?: ((absolutePath: string) => string) | undefined;
+};
+
+function comparable(path: string, match: WiringMatch): string {
+  const absolute = resolve(path);
+  const canonical = match.canonical === undefined ? absolute : match.canonical(absolute);
+  return match.foldCase ? canonical.toLowerCase() : canonical;
+}
+
+// invariant: without a match this is `isProtectedWiringTarget`, so a host that brings no facts sees no change.
+export function matchesProtectedTarget(
+  target: string,
+  protectedPaths: readonly string[],
+  match?: WiringMatch,
+): boolean {
+  if (match === undefined) {
+    return isProtectedWiringTarget(target, protectedPaths);
+  }
+  const resolved = comparable(target, match);
+  return protectedPaths.some((path) => isInside(comparable(path, match), resolved));
+}
+
+/** Equality, not containment: a path under an ancestor that is not itself a target is ordinary work. */
+export function matchesProtectedAncestor(
+  target: string,
+  ancestors: readonly string[],
+  match: WiringMatch,
+): boolean {
+  const resolved = comparable(target, match);
+  return ancestors.some((ancestor) => relative(comparable(ancestor, match), resolved) === "");
+}
+
 // invariant: the policy surface is defined here, next to the floor's other path predicates, because the
 // floor decides before any policy is read. Defining it inside the policy module would point the dependency
 // backwards — against the order the two actually run in.
@@ -56,11 +91,12 @@ export function isPolicySurface(
   projectDir: string,
   filePath: string,
   extraSurfacePaths: readonly string[] = [],
+  match?: WiringMatch,
 ): boolean {
   if (isRuntimePolicySurface(filePath)) {
     return true;
   }
-  if (isProtectedWiringTarget(filePath, extraSurfacePaths)) {
+  if (matchesProtectedTarget(filePath, extraSurfacePaths, match)) {
     return true;
   }
   const target = normalizeSeparators(relative(projectDir, filePath) || filePath);

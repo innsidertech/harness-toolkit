@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { HarnessEvent } from "../../contracts/index.ts";
@@ -606,5 +606,314 @@ test("AGH-06 (path alias): a canonical match that throws is refused as handler-e
     });
   } finally {
     provider.canonicalWiringMatch = original;
+  }
+});
+
+/** AGF-17 to AGF-25: the wiring routes the tool table does not show reach the floor through the port. */
+const PRE = "antigravity:PreToolUse";
+
+function shellPayload(root: string, command: string, cwd?: string): string {
+  const shell = fixtureWhere(PRE, (event) => event.event === "shell.before");
+  const args: Record<string, unknown> = { ...shell.toolCall?.args, CommandLine: command };
+  if (cwd === undefined) {
+    delete args.Cwd;
+  } else {
+    args.Cwd = cwd;
+  }
+  return JSON.stringify({ ...shell, workspacePaths: [root], toolCall: { ...shell.toolCall, args } });
+}
+
+function untranslatedPayload(root: string, name?: string, args?: Record<string, unknown>): string {
+  const raw = JSON.parse(
+    readFileSync(join(FIXTURE_DIR, "allow-PreToolUse-define_subagent--.json"), "utf8"),
+  ) as Payload;
+  const toolCall = raw.toolCall as { name: string; args: Record<string, unknown> };
+  return JSON.stringify({
+    ...raw,
+    workspacePaths: [root],
+    toolCall: { name: name ?? toolCall.name, args: args ?? toolCall.args },
+  });
+}
+
+function cursorShell(root: string, command: string): string {
+  return JSON.stringify({ hook_event_name: "beforeShellExecution", workspace_roots: [root], command });
+}
+
+async function decide(scene: Scene, text: string, token: string | null = PRE) {
+  const outcome = await runHandler(toolBeforeHandler, io(scene, text, token));
+  const parsed = JSON.parse(outcome.rendered.stdout ?? "{}") as { decision?: string; reason?: string };
+  return { outcome, parsed, rule: /rule=([a-z-]+)/.exec(parsed.reason ?? "")?.[1] ?? null };
+}
+
+async function assertRule(scene: Scene, text: string, rule: string, label: string): Promise<void> {
+  const { outcome, parsed, rule: found } = await decide(scene, text);
+  assert.equal(parsed.decision, "deny", label);
+  assert.equal(found, rule, label);
+  assert.equal(outcome.failure, undefined, label);
+}
+
+async function assertShellAllowed(scene: Scene, command: string, cwd: string | undefined): Promise<void> {
+  const { outcome } = await decide(scene, shellPayload(scene.root, command, cwd));
+  assert.equal(outcome.rendered.stdout, '{"decision":"allow"}', `${cwd ?? "(no Cwd)"}: ${command}`);
+}
+
+const backslashOnly =
+  process.platform === "win32"
+    ? false
+    : "a \\ separates path segments only on Windows, so off it these reach no target (AGF-22c)";
+
+const EXTERNAL = resolve("/tlc-outside-project/x");
+
+test("AGF-17: an untranslated tool naming a protected hooks file in any string argument is wiring-tamper", async () => {
+  await inScene(async (scene) => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["edit_file", { path: "C:\\w\\.agents\\hooks.json" }],
+      ["mcp_fs_write", { target: { file: "~/.gemini/config/hooks.json" } }],
+      ["define_subagent", { name: "probe", system_prompt: "then write .agents/hooks.json" }],
+      ["x_tool", { files: ["a.txt", "%USERPROFILE%\\.gemini\\config\\hooks.json"] }],
+    ];
+    for (const [name, args] of cases) {
+      await assertRule(scene, untranslatedPayload(scene.root, name, args), "wiring-tamper", name);
+    }
+  });
+});
+
+test("AGF-18: an untranslated tool naming no protected file keeps its c31f3d4 allow", async () => {
+  await inScene(async (scene) => {
+    const { outcome } = await decide(scene, untranslatedPayload(scene.root));
+    assert.equal(outcome.rendered.stdout, '{"decision":"allow"}');
+  });
+});
+
+test("AGF-20, AGF-23: a command run in the workspace's .agents reaches its hooks file", async () => {
+  await inScene(async (scene) => {
+    for (const cwd of [join(scene.root, ".agents"), ".agents"]) {
+      for (const command of [
+        "rm -Force ./hooks.json",
+        "del hooks.json",
+        "echo {} > hooks.json",
+        "Set-Content hooks.json '{}'",
+      ]) {
+        await assertRule(
+          scene,
+          shellPayload(scene.root, command, cwd),
+          "wiring-tamper",
+          `${cwd}: ${command}`,
+        );
+      }
+    }
+    await assertRule(
+      scene,
+      shellPayload(scene.root, "rm -Force ./.agents/hooks.json"),
+      "wiring-tamper",
+      "no Cwd",
+    );
+  });
+});
+
+test("AGF-20, AGF-21, AGF-22b, AGF-22c: the backslash forms reach the hooks files on Windows", {
+  skip: backslashOnly,
+}, async () => {
+  await inScene(async (scene) => {
+    const cases: Array<[string | undefined, string]> = [
+      [join(scene.root, ".agents"), "Remove-Item -Force .\\hooks.json"],
+      [`${scene.root}\\.Agents`, "Remove-Item -Force .\\HOOKS.JSON"],
+      ["~/.gemini/config", "Remove-Item -Force .\\hooks.json"],
+      [`${scene.root}\\.agents`, "Remove-Item -Recurse -Force ."],
+      [undefined, "Move-Item .agents\\hooks.json x"],
+    ];
+    for (const [cwd, command] of cases) {
+      await assertRule(
+        scene,
+        shellPayload(scene.root, command, cwd),
+        "wiring-tamper",
+        `${cwd ?? "(no Cwd)"}: ${command}`,
+      );
+    }
+  });
+});
+
+test("AGF-22: relative operands resolve against the Cwd in every rule, without realpath", async () => {
+  await inScene(async (scene) => {
+    await assertRule(
+      scene,
+      shellPayload(scene.root, "Get-Content id_rsa", "~/.ssh"),
+      "secret-access",
+      "~/.ssh",
+    );
+    await assertRule(
+      scene,
+      shellPayload(scene.root, "Remove-Item -Recurse -Force .\\x", dirname(EXTERNAL)),
+      "outside-project-destruction",
+      "outside Cwd",
+    );
+    const { rule } = await decide(
+      scene,
+      shellPayload(scene.root, "rm -Force ./hooks.json", join(scene.root, "docs")),
+    );
+    assert.notEqual(rule, "wiring-tamper");
+  });
+});
+
+test("AGF-22a: an unresolvable Cwd decides by the file name, relative destruction, relative moves, then as $X/", async () => {
+  await inScene(async (scene) => {
+    const denied: Array<[string, string, string]> = [
+      ["$HOME/.gemini/config", "Remove-Item -Force .\\hooks.json", "wiring-tamper"],
+      ["%USERPROFILE%\\.gemini\\config", "echo {} > hooks.json", "wiring-tamper"],
+      ["$env:USERPROFILE\\.gemini\\config", "Set-Content HOOKS.JSON '{}'", "wiring-tamper"],
+      ["$env:TEMP", "Remove-Item -Recurse .\\x", "unprovable-destruction"],
+      ["$HOME/.gemini", "Move-Item config config-old", "wiring-tamper"],
+      ["$HOME/.gemini", "ren config x", "wiring-tamper"],
+      ["$HOME/.gemini", "mv config x", "wiring-tamper"],
+      ["$PWD", "Move-Item .agents x", "wiring-tamper"],
+      ["%CD%", "Rename-Item .agents x", "wiring-tamper"],
+      ["$HOME", `Remove-Item -Recurse -Force ${EXTERNAL}`, "outside-project-destruction"],
+    ];
+    for (const [cwd, command, rule] of denied) {
+      await assertRule(scene, shellPayload(scene.root, command, cwd), rule, `${cwd}: ${command}`);
+    }
+    for (const [cwd, command] of [
+      ["$HOME/.ssh", "Get-Content id_rsa"],
+      ["$HOME/.gemini", "Copy-Item x.json config"],
+      ["$PWD", "cat .env"],
+    ]) {
+      await assertShellAllowed(scene, command as string, cwd);
+    }
+  });
+});
+
+test("AGF-22b: destroying or moving a protected ancestor is wiring-tamper", async () => {
+  await inScene(async (scene) => {
+    for (const command of [
+      "Remove-Item -Recurse -Force .agents",
+      "rd /s /q .agents",
+      "rm -rf .agents",
+      "Move-Item .agents old-agents",
+      "mv .agents x",
+      "Rename-Item .agents x",
+      "ren .agents x",
+      "Move-Item ~/.gemini/config ~/.gemini/config-old",
+      "Remove-Item -Recurse -Force ~/.gemini",
+    ]) {
+      await assertRule(scene, shellPayload(scene.root, command), "wiring-tamper", command);
+    }
+    const { rule } = await decide(
+      scene,
+      shellPayload(scene.root, "Remove-Item -Recurse -Force .agents/skills"),
+    );
+    assert.notEqual(rule, "wiring-tamper");
+  });
+});
+
+test("AGF-22c: protected targets and ancestors compare without case on every system", async () => {
+  await inScene(async (scene) => {
+    await assertRule(
+      scene,
+      shellPayload(scene.root, "rm -Force ./.AGENTS/Hooks.Json"),
+      "wiring-tamper",
+      "no Cwd",
+    );
+    await assertRule(
+      scene,
+      shellPayload(scene.root, "del HOOKS.json", "~/.GEMINI/Config"),
+      "wiring-tamper",
+      "Cwd",
+    );
+    await assertRule(
+      scene,
+      shellPayload(scene.root, "Remove-Item -Recurse -Force .Agents"),
+      "wiring-tamper",
+      "ancestor",
+    );
+  });
+});
+
+test("AGF-24: the same commands from a Cursor event keep the c31f3d4 decision", async () => {
+  await inScene(async (scene) => {
+    for (const command of [
+      "Remove-Item -Recurse -Force .agents",
+      "rm ./.AGENTS/hooks.json",
+      "rm -rf .agents",
+      "mv .agents x",
+      "Remove-Item -Recurse -Force .Agents",
+    ]) {
+      const { outcome, rule } = await decide(scene, cursorShell(scene.root, command), null);
+      assert.equal(outcome.event?.provider, "cursor", command);
+      assert.notEqual(rule, "wiring-tamper", command);
+    }
+  });
+});
+
+test("AGF-22d: device prefix, trailing dot and space, 8.3 and a real junction reach the hooks files through the canonical form", {
+  skip: windowsOnly,
+}, async (t) => {
+  await inScene(async (scene) => {
+    assert.match(basename(homedir()), /^tlc-test-home-dir-/, "the junction target lives in the fake home");
+    const config = join(homedir(), ".gemini", "config");
+    mkdirSync(config, { recursive: true });
+    try {
+      const agents = join(scene.root, ".agents");
+      const cases: Array<[string | undefined, string]> = [
+        [`\\\\?\\${agents}`, "Set-Content hooks.json '{}'"],
+        [`${agents}.`, "echo {} > hooks.json"],
+        [`${agents} `, "Remove-Item -Force .\\hooks.json"],
+      ];
+      const shortName = join(homedir(), "GEMINI~1", "config");
+      if (existsSync(shortName)) {
+        cases.push([shortName, "Set-Content hooks.json '{}'"]);
+      } else {
+        t.diagnostic("this volume generates no 8.3 short names; the short-name Cwd is not exercised");
+      }
+      const junction = join(scene.root, "j");
+      symlinkSync(config, junction, "junction");
+      cases.push(
+        [junction, "Set-Content hooks.json '{}'"],
+        [undefined, "Set-Content .\\j\\hooks.json '{}'"],
+        [undefined, "Remove-Item -Recurse -Force .\\j"],
+        [junction, "Remove-Item -Recurse -Force ."],
+      );
+      for (const [cwd, command] of cases) {
+        await assertRule(
+          scene,
+          shellPayload(scene.root, command, cwd),
+          "wiring-tamper",
+          `${cwd ?? "(no Cwd)"}: ${command}`,
+        );
+      }
+      await assertShellAllowed(scene, "Get-ChildItem", junction);
+      for (const command of ["Set-Content .\\j\\hooks.json '{}'", "Remove-Item -Recurse -Force .\\j"]) {
+        const { rule } = await decide(scene, cursorShell(scene.root, command), null);
+        assert.notEqual(rule, "wiring-tamper", `cursor: ${command}`);
+      }
+    } finally {
+      rmSync(join(homedir(), ".gemini"), { recursive: true, force: true });
+    }
+  });
+});
+
+test("AGF-22d, AGH-06: a canonical form that throws is refused as handler-error", async () => {
+  const provider = antigravity();
+  const original = provider.floorHostFacts;
+  assert.equal(typeof original, "function", "the adapter declares floorHostFacts");
+  provider.floorHostFacts = (event, protectedPaths) => {
+    const facts = original?.call(provider, event, protectedPaths) ?? null;
+    return facts === null
+      ? null
+      : {
+          ...facts,
+          canonical: () => {
+            throw new Error("no resolvable ancestor");
+          },
+        };
+  };
+  try {
+    await inScene(async (scene) => {
+      const { outcome } = await decide(scene, shellPayload(scene.root, "Remove-Item -Force ./x", scene.root));
+      assert.equal(outcome.rendered.stdout, deny("handler-error"));
+      assert.equal(outcome.failure, "handler-error");
+      assert.ok(obsRecords(scene.root).some((record) => record.kind === "adapter.error"));
+    });
+  } finally {
+    provider.floorHostFacts = original;
   }
 });
