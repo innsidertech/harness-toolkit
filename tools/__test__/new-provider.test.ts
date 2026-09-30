@@ -110,18 +110,22 @@ test("scaffolded stubs compile under tsc --noEmit, and add no new package.json d
 });
 
 describe("appendProviderToRegistry", () => {
-  test("appends the new provider after the existing two, unchanged in order", () => {
+  test("appends the new provider after the existing three, unchanged in order", () => {
     const current = readFileSync(join(repoRoot, "src", "providers", "provider.registry.ts"), "utf8");
-    assert.match(current, /export const providers: ProviderPort\[\] = \[cursorProvider, claudeProvider\];/);
+    assert.match(
+      current,
+      /export const providers: ProviderPort\[\] = \[cursorProvider, claudeProvider, antigravityProvider\];/,
+    );
 
     const next = appendProviderToRegistry(current, "acme");
 
     assert.match(next, /import \{ acmeProvider \} from "\.\/acme\/index\.ts";/);
     assert.match(
       next,
-      /export const providers: ProviderPort\[\] = \[cursorProvider, claudeProvider, acmeProvider\];/,
+      /export const providers: ProviderPort\[\] = \[cursorProvider, claudeProvider, antigravityProvider, acmeProvider\];/,
     );
-    // why: cursor/claude's own imports are untouched — only a new line and the array literal changed.
+    // why: the existing providers' own imports are untouched — only a new line and the array literal changed.
+    assert.match(next, /import \{ antigravityProvider \} from "\.\/antigravity\/index\.ts";/);
     assert.match(next, /import \{ claudeProvider \} from "\.\/claude\/index\.ts";/);
     assert.match(next, /import \{ cursorProvider \} from "\.\/cursor\/index\.ts";/);
   });

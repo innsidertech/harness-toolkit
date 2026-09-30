@@ -92,6 +92,7 @@ test("renderAll reports a missing marker per file, and does not crash, rather th
     mkdirSync(join(scratch, "docs", "providers"), { recursive: true });
     writeFileSync(join(scratch, "docs", "providers", "claude-code.md"), "# no markers here\n", "utf8");
     writeFileSync(join(scratch, "docs", "providers", "cursor.md"), "# no markers here\n", "utf8");
+    writeFileSync(join(scratch, "docs", "providers", "antigravity.md"), "# no markers here\n", "utf8");
 
     console.error = (message?: unknown) => {
       messages.push(String(message));
