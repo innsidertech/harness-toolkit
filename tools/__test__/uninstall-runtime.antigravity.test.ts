@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, test } from "node:test";
+import { antigravityCliDir } from "../../src/providers/antigravity/antigravity.paths.ts";
 import {
   antigravityWiring,
   mergeAntigravityGroup,
@@ -106,6 +115,36 @@ describe("uninstall and the antigravity group", () => {
       second.items.some((item) => item.target === hooks),
       false,
     );
+  });
+
+  test("AGF-60: the target list names the CLI directory's init skill link", () => {
+    assert.ok(uninstallTargets().skillLinks.includes(join(antigravityCliDir(), "skills", "harness-init")));
+  });
+
+  test("AGF-60: --yes removes the installer's skill link and leaves every other file of the CLI directory", () => {
+    const root = mkdtempSync(join(tmpdir(), "uninstall-agy-skill-"));
+    roots.push(root);
+    const runtime = join(root, "runtime");
+    const cliDir = join(root, "home", ".gemini", "antigravity-cli");
+    const link = join(cliDir, "skills", "harness-init");
+    mkdirSync(join(runtime, "skills", "harness-init"), { recursive: true });
+    mkdirSync(join(cliDir, "skills", "other"), { recursive: true });
+    writeFileSync(join(cliDir, "settings.json"), "{}");
+    writeFileSync(join(cliDir, "skills", "other", "SKILL.md"), "other");
+    symlinkSync(join(runtime, "skills", "harness-init"), link, "junction");
+    const targets: UninstallTargets = {
+      home: runtime,
+      binLinks: [],
+      claudeSettings: join(root, "claude", "settings.json"),
+      cursorHooks: join(root, "cursor", "hooks.json"),
+      antigravityHooks: join(root, "home", ".gemini", "config", "hooks.json"),
+      skillLinks: [link],
+    };
+    const result = applyUninstall(planUninstall(targets), targets);
+    assert.deepEqual(result.failed, []);
+    assert.equal(existsSync(link), false);
+    assert.equal(readFileSync(join(cliDir, "settings.json"), "utf8"), "{}");
+    assert.equal(readFileSync(join(cliDir, "skills", "other", "SKILL.md"), "utf8"), "other");
   });
 
   test("a file without the group, or one that does not parse, is never rewritten", () => {

@@ -21,7 +21,10 @@ import {
 } from "../src/platform/paths.ts";
 import { type Row, render, type Screen } from "../src/platform/screen.ts";
 import { createStyle, PLAIN, type Style } from "../src/platform/style.ts";
-import { antigravityGlobalHooksPath } from "../src/providers/antigravity/antigravity.paths.ts";
+import {
+  antigravityCliDir,
+  antigravityGlobalHooksPath,
+} from "../src/providers/antigravity/antigravity.paths.ts";
 import { unwireAntigravityHooks } from "../src/providers/antigravity/antigravity.wiring.ts";
 import { removeClaudeWiring, unmergeClaudeSettings } from "../src/providers/claude/claude.wiring.ts";
 import { unwireCursorHooks } from "../src/providers/cursor/cursor.wiring.ts";
@@ -79,6 +82,7 @@ export function uninstallTargets(env: NodeJS.ProcessEnv = process.env): Uninstal
     skillLinks: [
       join(claudeConfigDir(), "skills", "harness-init"),
       join(cursorConfigDir(), "skills", "harness-init"),
+      join(antigravityCliDir(), "skills", "harness-init"),
       // the layout the PowerShell installer wrote: one junction no provider ever read
       join(userHome, ".tlc", "skills", "harness-init"),
     ],

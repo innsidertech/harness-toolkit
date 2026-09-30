@@ -5,8 +5,14 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  antigravityCliDir,
+  antigravityGlobalHooksPath,
+} from "../../providers/antigravity/antigravity.paths.ts";
+import {
   bootDir,
+  claudeConfigDir,
   conventionalRuntimeHome,
+  cursorConfigDir,
   findProjectRoot,
   flagsDir,
   loopsDir,
@@ -15,8 +21,30 @@ import {
   presenceDir,
   projectConfigPath,
   projectStateDir,
+  providerConfigDirs,
   runtimeHome,
+  userSettingsPaths,
 } from "../paths.ts";
+
+describe("provider lists", () => {
+  test("AGF-55: the user hook documents are Claude, Cursor, then the Antigravity global file", () => {
+    assert.deepEqual(userSettingsPaths(), [
+      join(claudeConfigDir(), "settings.json"),
+      join(cursorConfigDir(), "hooks.json"),
+      join(homedir(), ".gemini", "config", "hooks.json"),
+    ]);
+    assert.equal(userSettingsPaths()[2], antigravityGlobalHooksPath());
+  });
+
+  test("AGF-57: the provider config directories are Cursor, Claude, then the Antigravity CLI directory", () => {
+    assert.deepEqual(providerConfigDirs(), [
+      cursorConfigDir(),
+      claudeConfigDir(),
+      join(homedir(), ".gemini", "antigravity-cli"),
+    ]);
+    assert.equal(providerConfigDirs()[2], antigravityCliDir());
+  });
+});
 
 describe("runtimeHome", () => {
   const original = process.env.TLC_HOME;
