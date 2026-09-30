@@ -179,7 +179,10 @@ resort every time the group is in place.
 
 ## Gaps
 
-- Hooks fired from inside a subagent were not measured.
+- Hooks inside a subagent were measured in spike S3, on CLI 1.2.14, with the group in the workspace
+  `.agents/hooks.json`: the subagent's tools fire neither `PreToolUse` nor `PostToolUse`. The global group in
+  `~/.gemini/config/hooks.json`, where `tlc harness install` writes the floor, was not measured with a subagent.
+  Do not count on the floor for subagents.
 - MCP tool calls were not captured.
 - `multi_replace_file_content` is not verified: its arguments are assumed from its single-edit sibling, and only
   the path is read.
@@ -197,7 +200,8 @@ resort every time the group is in place.
 - A `tlc-harness` hook with `enabled: false` in the workspace `.agents/hooks.json` might disable the global
   group; this was not measured, and the doctor does not read the workspace file.
 - `allow` in an interactive session was not measured.
-- The payload of a CLI newer than 1.2.13 was not measured.
+- A payload change in a CLI newer than 1.2.14 was not measured. The stdin captures are from 1.2.13; 1.2.14
+  payloads were seen only in spike S3 and in the end-to-end proof.
 - A launcher path containing a space is not supported.
 - The hook inherits environment variables whose names look like credentials.
 - `~/.gemini/antigravity-cli/settings.json` and plugin hooks are not protected.
