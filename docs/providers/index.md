@@ -23,6 +23,10 @@ type ProviderPort = {
   wiring(runtime: RuntimePaths): ProviderWiring;
   projectWiringTargets?(projectDir: string): string[];
   readonly failClosed?: FailClosedPosture;
+  canonicalWiringMatch?(
+    event: HarnessEvent,
+    protectedPaths: readonly string[],
+  ): { filePath: string; protectedPaths: string[] } | null;
 };
 ```
 
@@ -40,6 +44,9 @@ type ProviderPort = {
   machine-wide ones.
 - `failClosed` — for a host that reads silence as permission: the token prefix that marks its invocations and
   the refusal each harness failure renders ([/decisions/ad-156.md](/decisions/ad-156.md)).
+- `canonicalWiringMatch` — for a host whose file paths can alias a protected target: when a write reaches one
+  only through an alias, the path and targets the floor judges instead of the raw ones; `null` otherwise
+  ([/decisions/ad-156.md](/decisions/ad-156.md)).
 
 ## Registered providers
 
