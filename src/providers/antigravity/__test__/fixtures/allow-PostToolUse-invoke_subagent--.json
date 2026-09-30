@@ -1,0 +1,25 @@
+{
+  "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+  "conversationId": "<id>",
+  "error": "subagent \"probe\" not found or not allowed to be invoked",
+  "modelName": "gemini-3.8-flash-high",
+  "stepIdx": 8,
+  "toolCall": {
+    "args": {
+      "Subagents": [
+        {
+          "Prompt": "Execute probe task.",
+          "Role": "Probe Subagent",
+          "TypeName": "probe"
+        }
+      ],
+      "toolAction": "Invoking probe agent",
+      "toolSummary": "Invoke probe agent"
+    },
+    "name": "invoke_subagent"
+  },
+  "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+  ]
+}

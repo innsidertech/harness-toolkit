@@ -42,7 +42,7 @@ export const DEFAULT_CONFIG: Omit<BoundaryCheckConfig, "root"> = {
   styleModule: "src/platform/style.ts",
 };
 
-const VENDOR_PATTERN = /\b(cursor|claude|codex|composer|anthropic)\b/i;
+const VENDOR_PATTERN = /\b(cursor|claude|codex|composer|anthropic|antigravity|gemini)\b/i;
 const HOME_ENV_PATTERN = /process\.env\.HOME\b/;
 
 /**
