@@ -82,6 +82,93 @@ test("path alias: with no existing ancestor there is nothing to resolve, and the
   assert.deepEqual(calls, []);
 });
 
+const VOLUME = "\\\\?\\Volume{1903db38-a741-4d61-bcc9-107896be8d3d}";
+
+test("path alias: a device prefix before a name that is not a drive letter stays and reaches realpath", () => {
+  for (const root of [
+    VOLUME,
+    "\\\\.\\Volume{1903db38-a741-4d61-bcc9-107896be8d3d}",
+    "\\\\?\\GLOBALROOT\\Device\\HarddiskVolume7",
+  ]) {
+    const users = `${root}\\Users`;
+    const { calls, deps } = disk([users], { [users]: "C:\\Users" });
+    assert.equal(
+      antigravityCanonicalPath(`${users}\\dev\\.gemini\\config\\hooks.json`, PROJECT, deps),
+      TARGET,
+      root,
+    );
+    assert.deepEqual(calls, [users], root);
+  }
+});
+
+test("path alias: under a kept device prefix with no existing ancestor, the form throws", () => {
+  const { calls, deps } = disk([]);
+  for (const path of [
+    "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\x\\hooks.json",
+    "\\\\?\\GLOBALROOT\\Device\\Nope\\x\\hooks.json",
+    "\\\\.\\Volume{00000000-0000-0000-0000-000000000000}\\x",
+  ]) {
+    assert.throws(
+      () => antigravityCanonicalPath(path, PROJECT, deps),
+      /canonical path: no resolvable ancestor/,
+      path,
+    );
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("path alias: the no-resolvable-ancestor error does not carry the path", () => {
+  const { deps } = disk([]);
+  assert.throws(
+    () => antigravityCanonicalPath(`${VOLUME}\\secret-name\\hooks.json`, PROJECT, deps),
+    (error: Error) => !error.message.includes("secret-name"),
+  );
+});
+
+test("path alias: a realpath that answers with a drive-letter device prefix loses it again", () => {
+  for (const prefix of ["\\\\?\\", "\\\\.\\"]) {
+    const users = `${VOLUME}\\Users`;
+    const { deps } = disk([users], { [users]: `${prefix}C:\\Users` });
+    assert.equal(
+      antigravityCanonicalPath(`${users}\\dev\\.gemini\\config\\hooks.json`, PROJECT, deps),
+      TARGET,
+      prefix,
+    );
+  }
+});
+
+test("path alias: trailing dots and spaces leave a middle segment that does not exist yet, and . and .. stay", () => {
+  const { deps } = disk(["C:\\", "C:\\w"]);
+  assert.equal(
+    antigravityCanonicalPath("C:\\w\\.agents.\\hooks.json", PROJECT, deps),
+    "C:\\w\\.agents\\hooks.json",
+  );
+  assert.equal(
+    antigravityCanonicalPath("C:\\w\\.agents \\hooks.json", PROJECT, deps),
+    "C:\\w\\.agents\\hooks.json",
+  );
+  assert.equal(
+    antigravityCanonicalPath("C:\\w\\.agents. .\\hooks.json", PROJECT, deps),
+    "C:\\w\\.agents\\hooks.json",
+  );
+  assert.equal(antigravityCanonicalPath(".agents.\\hooks.json", PROJECT, deps), "C:\\w\\.agents\\hooks.json");
+  assert.equal(
+    antigravityCanonicalPath("C:\\w\\x\\..\\.agents\\hooks.json", PROJECT, deps),
+    "C:\\w\\.agents\\hooks.json",
+  );
+  assert.equal(
+    antigravityCanonicalPath("C:\\w\\.\\.agents\\hooks.json", PROJECT, deps),
+    "C:\\w\\.agents\\hooks.json",
+  );
+});
+
+test("path alias: a kept device prefix is not touched by the trailing-dot step", () => {
+  const users = "\\\\.\\Volume{1903db38-a741-4d61-bcc9-107896be8d3d}\\Users";
+  const { calls, deps } = disk([users], { [users]: "C:\\Users" });
+  assert.equal(antigravityCanonicalPath(`${users}.\\dev \\x.json`, PROJECT, deps), "C:\\Users\\dev\\x.json");
+  assert.deepEqual(calls, [users]);
+});
+
 test("path alias: ~ expands with the home, and a relative path resolves under the project", () => {
   assert.equal(antigravityCanonicalPath("~\\.gemini\\config\\hooks.json", PROJECT, plainDisk), TARGET);
   assert.equal(antigravityCanonicalPath("~/.gemini/config/hooks.json", PROJECT, plainDisk), TARGET);
@@ -183,6 +270,16 @@ test("path alias: a junction in the protected target's own ancestor matches a Ta
   assert.deepEqual(match, {
     filePath: "E:\\profiles\\dev\\.gemini\\config\\hooks.json",
     protectedPaths: ["E:\\profiles\\dev\\.gemini\\config\\hooks.json"],
+  });
+});
+
+test("path alias: on Windows a match ignores case, in a segment that does not exist yet, and keeps each side's case", () => {
+  const { deps } = disk(["C:\\", "C:\\w"]);
+  const target = "C:\\w\\.agents\\hooks.json";
+  const alias = "C:\\w\\.AGENTS\\Hooks.JSON";
+  assert.deepEqual(antigravityCanonicalWiringMatch(event({ filePath: alias }), [target], deps), {
+    filePath: alias,
+    protectedPaths: [target],
   });
 });
 

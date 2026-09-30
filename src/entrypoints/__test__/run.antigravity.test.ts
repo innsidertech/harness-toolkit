@@ -452,6 +452,86 @@ test("AGH-17, AGH-18, AGH-23 (path alias): every alias of the workspace hooks fi
   });
 });
 
+function powershell(script: string) {
+  return spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+}
+
+/** `\\?\Volume{GUID}\` of the volume holding a path, as mountvol lists it. */
+function volumeGuidRoot(path: string): string {
+  const listed = powershell(`mountvol '${path.slice(0, 2)}\\' /L`);
+  const root = listed.stdout.trim();
+  assert.match(root, /^\\\\\?\\Volume\{[0-9a-f-]+\}\\$/i, `mountvol: ${listed.stderr}`);
+  return root;
+}
+
+/** The NT device name of a drive (`\Device\HarddiskVolumeN`), or null when it cannot be read. */
+function ntDeviceName(path: string): string | null {
+  const read = powershell(
+    [
+      "Add-Type -Name Dos -Namespace TlcTest -MemberDefinition '[DllImport(\"kernel32.dll\", CharSet=CharSet.Unicode)] public static extern uint QueryDosDeviceW(string d, System.Text.StringBuilder b, uint m);'",
+      "$b = New-Object System.Text.StringBuilder 1024",
+      `if ([TlcTest.Dos]::QueryDosDeviceW('${path.slice(0, 2)}', $b, 1024) -eq 0) { exit 1 }`,
+      "[Console]::Out.Write($b.ToString())",
+    ].join("; "),
+  );
+  const name = read.status === 0 ? read.stdout.trim() : "";
+  return name.startsWith("\\Device\\") ? name : null;
+}
+
+test("AGH-17, AGH-18, AGH-23 (path alias): volume, case and middle-segment aliases of the workspace hooks file are wiring-tamper", {
+  skip: windowsOnly,
+}, async (t) => {
+  await inScene(async (scene) => {
+    const target = join(scene.root, ".agents", "hooks.json");
+    const underRoot = target.slice(3);
+    const aliases = [
+      `${volumeGuidRoot(target)}${underRoot}`,
+      join(scene.root, ".AGENTS", "Hooks.JSON"),
+      target.toUpperCase(),
+      `${scene.root}\\.agents.\\hooks.json`,
+      `${scene.root}\\.agents \\hooks.json`,
+    ];
+    const device = ntDeviceName(target);
+    if (device === null) {
+      t.diagnostic("QueryDosDeviceW could not be read; the GLOBALROOT alias is not exercised");
+    } else {
+      aliases.push(`\\\\?\\GLOBALROOT${device}\\${underRoot}`);
+    }
+    assert.equal(
+      existsSync(join(scene.root, ".agents")),
+      false,
+      "the aliases reach a target that does not exist yet",
+    );
+    for (const payload of writeFixtures()) {
+      for (const alias of aliases) {
+        const outcome = await runHandler(
+          toolBeforeHandler,
+          io(scene, inWorkspace(payload, scene.root, { TargetFile: alias })),
+        );
+        const label = `${outcome.event?.toolName}: ${alias}`;
+        assertWiringTamper(outcome, label);
+        assert.equal(outcome.event?.filePath, alias, label);
+      }
+    }
+  });
+});
+
+test("AGH-06 (path alias): a volume GUID that does not exist on this machine is refused as handler-error", {
+  skip: windowsOnly,
+}, async () => {
+  await inScene(async (scene) => {
+    const alias = "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\x\\.agents\\hooks.json";
+    for (const payload of writeFixtures()) {
+      const outcome = await runHandler(
+        toolBeforeHandler,
+        io(scene, inWorkspace(payload, scene.root, { TargetFile: alias })),
+      );
+      assert.equal(outcome.rendered.stdout, deny("handler-error"), alias);
+      assert.equal(outcome.failure, "handler-error", alias);
+    }
+  });
+});
+
 test("AGH-17 (path alias): a junction in the protected target's own ancestor matches a TargetFile written through its destination", {
   skip: windowsOnly,
 }, async () => {

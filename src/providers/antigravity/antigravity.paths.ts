@@ -25,6 +25,21 @@ type CanonicalPathDeps = {
 };
 
 const DEVICE_PREFIXES = ["\\\\?\\", "\\\\.\\"];
+const DRIVE_ROOT = /^[A-Za-z]:\\/;
+
+function devicePrefixOf(path: string): string {
+  return DEVICE_PREFIXES.find((candidate) => path.startsWith(candidate)) ?? "";
+}
+
+/**
+ * invariant: a device prefix leaves only in front of a drive letter. Before `Volume{GUID}\` or `GLOBALROOT\`,
+ * dropping it would leave a relative path, so it stays for realpath to resolve.
+ */
+function withoutDrivePrefix(path: string): string {
+  const prefix = devicePrefixOf(path);
+  const rest = path.slice(prefix.length);
+  return prefix !== "" && DRIVE_ROOT.test(rest) ? rest : path;
+}
 
 function lastSeparator(path: string): number {
   return Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
@@ -44,6 +59,10 @@ function withoutTrailingDotsAndSpaces(segment: string): string {
   return segment === "." || segment === ".." ? segment : segment.replace(/[. ]+$/, "");
 }
 
+function withEverySegment(path: string, edit: (segment: string) => string): string {
+  return path.replace(/[^\\/]+/g, edit);
+}
+
 /**
  * invariant: the same `~` rule as the floor's `resolveTarget`. Repeated rather than imported, because an adapter
  * may not import core.
@@ -58,18 +77,21 @@ function absoluteWin32(path: string, projectDir: string, home: string): string {
   return win32.isAbsolute(expanded) ? win32.resolve(expanded) : win32.resolve(projectDir, expanded);
 }
 
-function realpathOfExistingAncestor(absolute: string, deps: CanonicalPathDeps): string {
+function realpathOfExistingAncestor(absolute: string, deps: CanonicalPathDeps, keptPrefix: boolean): string {
   let ancestor = absolute;
   const missing: string[] = [];
   while (!deps.exists(ancestor)) {
     const parent = win32.dirname(ancestor);
     if (parent === ancestor) {
+      if (keptPrefix) {
+        throw new Error("canonical path: no resolvable ancestor");
+      }
       return absolute;
     }
     missing.unshift(win32.basename(ancestor));
     ancestor = parent;
   }
-  return win32.join(deps.realpath(ancestor), ...missing);
+  return win32.join(withoutDrivePrefix(deps.realpath(ancestor)), ...missing);
 }
 
 function resolveDeps(deps: Partial<CanonicalPathDeps>): CanonicalPathDeps {
@@ -81,7 +103,10 @@ function resolveDeps(deps: Partial<CanonicalPathDeps>): CanonicalPathDeps {
   };
 }
 
-/** Windows alias-free form of a path ([/decisions/ad-156.md](/decisions/ad-156.md)); off Windows, the path itself. Throws when realpath fails. */
+/**
+ * Windows alias-free form of a path ([/decisions/ad-156.md](/decisions/ad-156.md)); off Windows, the path itself.
+ * Throws when realpath fails, or when a kept device prefix has no existing ancestor.
+ */
 export function antigravityCanonicalPath(
   path: string,
   projectDir: string,
@@ -91,10 +116,15 @@ export function antigravityCanonicalPath(
   if (resolved.platform !== "win32") {
     return path;
   }
-  const prefix = DEVICE_PREFIXES.find((candidate) => path.startsWith(candidate));
-  const bare = prefix === undefined ? path : path.slice(prefix.length);
-  const named = withLastSegment(withLastSegment(bare, withoutStreamSuffix), withoutTrailingDotsAndSpaces);
-  return realpathOfExistingAncestor(absoluteWin32(named, projectDir, resolved.home), resolved);
+  const stripped = withoutDrivePrefix(path);
+  const kept = devicePrefixOf(stripped);
+  const body = stripped.slice(kept.length);
+  const named = withEverySegment(withLastSegment(body, withoutStreamSuffix), withoutTrailingDotsAndSpaces);
+  return realpathOfExistingAncestor(
+    absoluteWin32(kept + named, projectDir, resolved.home),
+    resolved,
+    kept !== "",
+  );
 }
 
 const CANONICAL_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
@@ -120,5 +150,9 @@ export function antigravityCanonicalWiringMatch(
   }
   const filePath = antigravityCanonicalPath(event.filePath, event.projectDir, deps);
   const targets = protectedPaths.map((path) => antigravityCanonicalPath(path, event.projectDir, deps));
-  return targets.includes(filePath) ? { filePath, protectedPaths: targets } : null;
+  // invariant: the same case folding as the floor's win32.relative, so the floor still sees the match.
+  const folded = filePath.toLowerCase();
+  return targets.some((target) => target.toLowerCase() === folded)
+    ? { filePath, protectedPaths: targets }
+    : null;
 }
