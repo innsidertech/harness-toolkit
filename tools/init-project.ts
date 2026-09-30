@@ -8,6 +8,7 @@ import { DEFAULTS } from "../src/core/policy/policy.defaults.ts";
 import { claudeConfigDir, cursorConfigDir, projectConfigPath, runtimeHome } from "../src/platform/paths.ts";
 import { render, type Screen } from "../src/platform/screen.ts";
 import { PLAIN, type Style } from "../src/platform/style.ts";
+import { antigravityCliDir } from "../src/providers/antigravity/antigravity.paths.ts";
 import { applyClaudeWiring } from "../src/providers/claude/claude.wiring.ts";
 
 export class UsageError extends Error {}
@@ -194,6 +195,21 @@ export function detectProviders(dirs: { cursor?: string; claude?: string } = {})
   };
 }
 
+/**
+ * why separate from `detectProviders`: this host has no project file init may write. Its workspace hooks file is
+ * a wiring target the floor protects, and a project group beside the global one fires twice
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+export function detectAntigravity(dir = antigravityCliDir()): boolean {
+  return existsSync(dir);
+}
+
+export function antigravityInitLine(present: boolean): string {
+  return present
+    ? "init: antigravity detected — project .agents/hooks.json not written; the global group is written by tlc harness install"
+    : "init: antigravity not installed — skipped";
+}
+
 export type InitPlan = {
   policy: unknown;
   cursorHooksDocument: unknown | null;
@@ -344,6 +360,7 @@ export async function main(argv: string[]): Promise<void> {
   } else {
     console.log(`hooks: ${outcome.claude.status} ${outcome.claude.target}`);
   }
+  console.log(antigravityInitLine(detectAntigravity()));
   console.log("updated .gitignore harness entries");
 }
 

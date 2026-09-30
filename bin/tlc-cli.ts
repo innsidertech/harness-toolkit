@@ -30,6 +30,7 @@ import {
 } from "../src/platform/paths.ts";
 import { type Row, render, type Screen, type Section } from "../src/platform/screen.ts";
 import { createStyle, PLAIN, type Style } from "../src/platform/style.ts";
+import { ANTIGRAVITY_SURFACE_CLAIM } from "../src/providers/antigravity/antigravity.surfaces.ts";
 
 export class UsageError extends Error {}
 
@@ -129,6 +130,14 @@ export function statusScreen(root: string): Screen {
           "focus   only a destructive action or a dead-end reaches you; it settles ambiguity itself",
         ],
       },
+      {
+        title: "Surfaces",
+        rows: Object.entries(report.surfaces).map(([label, value]) => ({
+          label,
+          value,
+          level: "info" as const,
+        })),
+      },
     ],
     footer: "verification is identical at all three postures  ·  tlc harness why  ·  tlc harness doctor",
   };
@@ -145,6 +154,11 @@ export type StatusReport = {
   modeInvalid?: string;
   grind: boolean;
   gatesPaused: boolean;
+  /**
+   * Per host, which of its surfaces the floor has been shown to hold on. A host listed here has surfaces that read
+   * the same wiring but were never measured ([/decisions/ad-156.md](/decisions/ad-156.md)).
+   */
+  surfaces: Record<string, string>;
 };
 
 export function statusJson(root: string): StatusReport {
@@ -159,6 +173,7 @@ export function statusJson(root: string): StatusReport {
     ...(posture.invalid === undefined ? {} : { modeInvalid: posture.invalid }),
     grind: policy.grind.enabled,
     gatesPaused: gatesPaused(root),
+    surfaces: { antigravity: ANTIGRAVITY_SURFACE_CLAIM },
   };
 }
 
