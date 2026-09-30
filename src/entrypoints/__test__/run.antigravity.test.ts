@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
@@ -30,9 +30,13 @@ function antigravity(): ProviderPort {
 
 type Payload = Record<string, unknown> & { toolCall?: { name: string; args: Record<string, unknown> } };
 
-function fixtureWhere(token: string, matches: (event: HarnessEvent) => boolean): Payload {
+function fixtureWhere(
+  token: string,
+  matches: (event: HarnessEvent) => boolean,
+  includeSynthetic = false,
+): Payload {
   for (const name of readdirSync(FIXTURE_DIR)) {
-    if (name.startsWith("synthetic-")) {
+    if (name.startsWith("synthetic-") && !includeSynthetic) {
       continue;
     }
     const raw = JSON.parse(readFileSync(join(FIXTURE_DIR, name), "utf8")) as Payload;
@@ -387,4 +391,140 @@ test("AGH-83: composeProtectedPaths joins every provider's targets with the proj
     }
   }
   assert.ok(paths.includes(join("/w", ".agents", "hooks.json")));
+});
+
+/**
+ * AGH-17, AGH-18 and AGH-23 as amended for path aliases: a Windows alias of a protected target is still that target.
+ * The aliases are a Windows file system's, so off Windows there is nothing to alias.
+ */
+const windowsOnly = process.platform === "win32" ? false : "path aliases exist only on Windows";
+
+function writeFixtures(): Payload[] {
+  const token = "antigravity:PreToolUse";
+  return [
+    fixtureWhere(token, (event) => event.toolName === "Write"),
+    fixtureWhere(token, (event) => event.toolName === "Edit"),
+    fixtureWhere(token, (event) => event.toolName === "MultiEdit", true),
+  ];
+}
+
+function assertWiringTamper(outcome: Awaited<ReturnType<typeof runHandler>>, label: string): void {
+  const parsed = JSON.parse(outcome.rendered.stdout ?? "{}") as { decision?: string; reason?: string };
+  assert.equal(parsed.decision, "deny", label);
+  assert.match(parsed.reason ?? "", /rule=wiring-tamper/, label);
+  assert.equal(outcome.failure, undefined, label);
+}
+
+test("AGH-17, AGH-18, AGH-23 (path alias): every alias of the workspace hooks file is wiring-tamper, with filePath raw", {
+  skip: windowsOnly,
+}, async (t) => {
+  await inScene(async (scene) => {
+    const target = join(scene.root, ".agents", "hooks.json");
+    const scratch = dirname(scene.root);
+    const link = join(scratch, "link");
+    symlinkSync(scene.root, link, "junction");
+    const aliases = [
+      `\\\\?\\${target}`,
+      `\\\\.\\${target}`,
+      `${target}::$DATA`,
+      `${target}.`,
+      `${target} `,
+      `${target}. .`,
+      join(link, ".agents", "hooks.json"),
+    ];
+    const shortName = join(scratch, "WORKSP~1");
+    if (existsSync(shortName)) {
+      aliases.push(join(shortName, ".agents", "hooks.json"));
+    } else {
+      t.diagnostic("this volume generates no 8.3 short names; the short-name alias is not exercised");
+    }
+    for (const payload of writeFixtures()) {
+      for (const alias of aliases) {
+        const outcome = await runHandler(
+          toolBeforeHandler,
+          io(scene, inWorkspace(payload, scene.root, { TargetFile: alias })),
+        );
+        const label = `${outcome.event?.toolName}: ${alias}`;
+        assertWiringTamper(outcome, label);
+        assert.equal(outcome.event?.filePath, alias, label);
+      }
+    }
+  });
+});
+
+test("AGH-17 (path alias): a junction in the protected target's own ancestor matches a TargetFile written through its destination", {
+  skip: windowsOnly,
+}, async () => {
+  await inScene(async (scene) => {
+    const scratch = dirname(scene.root);
+    const realHome = join(scratch, "real-home");
+    const linkedHome = join(scratch, "home-link");
+    mkdirSync(realHome);
+    symlinkSync(realHome, linkedHome, "junction");
+    const previousProfile = process.env.USERPROFILE;
+    process.env.USERPROFILE = linkedHome;
+    try {
+      assert.equal(antigravity().wiringTargets()[0], join(linkedHome, ".gemini", "config", "hooks.json"));
+      const viaDestination = join(realHome, ".gemini", "config", "hooks.json");
+      for (const payload of writeFixtures()) {
+        const outcome = await runHandler(
+          toolBeforeHandler,
+          io(scene, inWorkspace(payload, scene.root, { TargetFile: viaDestination })),
+        );
+        assertWiringTamper(outcome, `${outcome.event?.toolName}: ${viaDestination}`);
+        assert.equal(outcome.event?.filePath, viaDestination);
+      }
+    } finally {
+      if (previousProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = previousProfile;
+      }
+    }
+  });
+});
+
+test("AGH-46 (path alias): the same aliases read through the read tool are not wiring-tamper", {
+  skip: windowsOnly,
+}, async () => {
+  await inScene(async (scene) => {
+    const target = join(scene.root, ".agents", "hooks.json");
+    const read = fixtureWhere("antigravity:PreToolUse", (event) => event.event === "read.before");
+    for (const alias of [
+      `\\\\?\\${target}`,
+      `\\\\.\\${target}`,
+      `${target}::$DATA`,
+      `${target}.`,
+      `${target} `,
+    ]) {
+      const outcome = await runHandler(
+        toolBeforeHandler,
+        io(scene, inWorkspace(read, scene.root, { AbsolutePath: alias })),
+      );
+      assert.equal(outcome.rendered.stdout, '{"decision":"allow"}', alias);
+    }
+  });
+});
+
+test("AGH-06 (path alias): a canonical match that throws is refused as handler-error", async () => {
+  const provider = antigravity();
+  const original = provider.canonicalWiringMatch;
+  assert.equal(typeof original, "function", "the adapter declares canonicalWiringMatch");
+  provider.canonicalWiringMatch = () => {
+    throw new Error("realpath refused");
+  };
+  try {
+    await inScene(async (scene) => {
+      const write = fixtureWhere("antigravity:PreToolUse", (event) => event.toolName === "Write");
+      const outcome = await runHandler(
+        toolBeforeHandler,
+        io(scene, inWorkspace(write, scene.root, { TargetFile: join(scene.root, "src", "a.ts") })),
+      );
+      assert.equal(outcome.rendered.stdout, deny("handler-error"));
+      assert.equal(outcome.failure, "handler-error");
+      assert.ok(obsRecords(scene.root).some((record) => record.kind === "adapter.error"));
+    });
+  } finally {
+    provider.canonicalWiringMatch = original;
+  }
 });

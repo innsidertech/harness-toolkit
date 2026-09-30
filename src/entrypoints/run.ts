@@ -21,6 +21,8 @@ export type HandlerContext = {
   provider: ProviderPort;
   now: Date;
   protectedPaths: string[];
+  /** The path the floor judges instead of the event's own, set only when an adapter matched a protected target through a path alias. */
+  floorFilePath?: string;
 };
 
 export type Handler = (event: HarnessEvent, ctx: HandlerContext) => Decision | Promise<Decision>;
@@ -332,6 +334,19 @@ export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunO
   return runResolved(handler, resolution.provider, resolution.event, owner, now);
 }
 
+/**
+ * invariant: the event itself stays raw. Only the floor's inputs change, and only when the adapter matched, so
+ * presence, claims, the refusal record and the render never see an adapter's resolved path
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+function handlerContext(event: HarnessEvent, base: HandlerContext): HandlerContext {
+  const alias = base.provider.canonicalWiringMatch?.(event, base.protectedPaths) ?? null;
+  if (alias === null) {
+    return base;
+  }
+  return { ...base, protectedPaths: alias.protectedPaths, floorFilePath: alias.filePath };
+}
+
 async function runResolved(
   handler: Handler,
   provider: ProviderPort,
@@ -369,7 +384,7 @@ async function runResolved(
       now,
     });
     const protectedPaths = composeProtectedPaths(providerRegistry, event.projectDir);
-    const context: HandlerContext = { policy, capabilities, provider, now, protectedPaths };
+    const context = handlerContext(event, { policy, capabilities, provider, now, protectedPaths });
     const decision = await handler(event, context);
     const degraded = degrade(decision, event, capabilities, {
       contextBudgetChars: CONTEXT_BUDGET_CHARS,

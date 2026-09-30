@@ -38,5 +38,10 @@ export type ProviderPort = {
   /** Wiring files inside the project the event names. Absent: the host reads none there. */
   projectWiringTargets?(projectDir: string): string[];
   readonly failClosed?: FailClosedPosture;
+  /** Floor inputs for a write that matches a protected target only through a path alias; null leaves the raw inputs. Throws when a path cannot be resolved. */
+  canonicalWiringMatch?(
+    event: HarnessEvent,
+    protectedPaths: readonly string[],
+  ): { filePath: string; protectedPaths: string[] } | null;
   lessonsView(root: string): string | null;
 };

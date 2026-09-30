@@ -9,7 +9,7 @@ import { coreFacade } from "../../core/index.ts";
 import { projectConfigPath } from "../../platform/paths.ts";
 import type { ProviderPort } from "../../providers/index.ts";
 import { providers } from "../../providers/index.ts";
-import { runHandler } from "../run.ts";
+import { type HandlerContext, runHandler } from "../run.ts";
 import { toolBeforeHandler } from "../tool-before.ts";
 
 function tempRoot(): string {
@@ -784,6 +784,89 @@ for (const [label, build] of [
     });
   }
 }
+
+/**
+ * Path-alias counter-proof — only the fail-closed host's adapter compares canonical forms. Under Cursor and Claude a
+ * Windows alias of a protected target is judged on the raw path, exactly as before.
+ */
+for (const [label, build] of [
+  [
+    "Claude",
+    (root: string, filePath: string) =>
+      claudeTool(root, { tool_name: "Write", tool_input: { file_path: filePath } }),
+  ],
+  [
+    "Cursor",
+    (root: string, filePath: string) =>
+      cursorTool(root, { tool_name: "Write", tool_input: { file_path: filePath } }),
+  ],
+] as const) {
+  test(`path alias: a Write under ${label} to an alias of a protected target keeps the raw path and is not wiring-tamper`, async () => {
+    const root = tempRoot();
+    try {
+      const target = join(root, ".agents", "hooks.json");
+      for (const alias of [`\\\\?\\${target}`, `${target}::$DATA`, `${target}.`, `${target} `]) {
+        const outcome = await runHandler(toolBeforeHandler, {
+          ...stdinOf(build(root, alias)),
+          hostEvent: null,
+        });
+        assert.equal(outcome.event?.filePath ?? outcome.event?.toolInput?.file_path, alias, alias);
+        const reason = outcome.decision.kind === "deny" ? outcome.decision.reason : "";
+        assert.doesNotMatch(reason, /rule=wiring-tamper/, alias);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+function directContext(root: string, provider: ProviderPort, protectedPaths: string[]): HandlerContext {
+  return {
+    policy: coreFacade.policy.loadPolicy(root),
+    capabilities: provider.capabilities(),
+    provider,
+    now: new Date(),
+    protectedPaths,
+  };
+}
+
+test("path alias: without ctx.floorFilePath the floor judges filePathOf(event); with it, the floor judges that path", async () => {
+  const root = tempRoot();
+  try {
+    const claude = providerNamed("claude");
+    const target = join(root, ".agents", "hooks.json");
+    const base: HarnessEvent = {
+      provider: "claude",
+      event: "tool.before",
+      sessionKey: "claude-floor-path",
+      projectDir: root,
+      toolName: "Write",
+      raw: {},
+    };
+    const fromInput = await toolBeforeHandler(
+      { ...base, toolInput: { file_path: target } },
+      directContext(root, claude, [target]),
+    );
+    assert.equal(fromInput.kind, "deny");
+    assert.match(fromInput.kind === "deny" ? fromInput.reason : "", /rule=wiring-tamper/);
+
+    const elsewhere = join(root, "src", "a.ts");
+    const judgedRaw = await toolBeforeHandler(
+      { ...base, filePath: elsewhere },
+      directContext(root, claude, [target]),
+    );
+    assert.doesNotMatch(judgedRaw.kind === "deny" ? judgedRaw.reason : "", /rule=wiring-tamper/);
+
+    const judgedOverride = await toolBeforeHandler(
+      { ...base, filePath: elsewhere },
+      { ...directContext(root, claude, [target]), floorFilePath: target },
+    );
+    assert.equal(judgedOverride.kind, "deny");
+    assert.match(judgedOverride.kind === "deny" ? judgedOverride.reason : "", /rule=wiring-tamper/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 /**
  * EFH-04 — a new provider's wiring target is protected the moment it registers, with zero change to
