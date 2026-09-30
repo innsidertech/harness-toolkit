@@ -408,6 +408,200 @@ describe("the release publishes without a credential and without a human", () =>
 });
 
 /**
+ * A fork's push to `main` must never reach `npm publish`.
+ *
+ * why every workflow and not only this one: the guard is about who may publish, and a job added to another file
+ * later publishes just as well. The jobs are split with the same header rule the check below uses, so no YAML
+ * dependency enters the repository for it.
+ */
+describe("only the upstream repository publishes", () => {
+  const UPSTREAM = "github.repository == 'tech-leads-club/harness-toolkit'";
+  const RELEASED = "needs.decide.outputs.released == 'true'";
+
+  type WorkflowFile = { name: string; text: string };
+  type Job = { file: string; name: string; condition: string; needs: string[]; publishes: boolean };
+
+  function runText(block: string[]): string[] {
+    const found: string[] = [];
+    for (let index = 0; index < block.length; index += 1) {
+      const match = /^(\s+)(?:- )?run: ?(.*)$/.exec(block[index] as string);
+      if (!match) {
+        continue;
+      }
+      found.push(match[2] as string);
+      const indent = (match[1] as string).length;
+      while (index + 1 < block.length) {
+        const next = block[index + 1] as string;
+        if (next.trim() !== "" && next.length - next.trimStart().length <= indent) {
+          break;
+        }
+        found.push(next);
+        index += 1;
+      }
+    }
+    return found.filter((line) => !line.trim().startsWith("#"));
+  }
+
+  function jobsOf(file: WorkflowFile): Job[] {
+    const lines = file.text.split("\n");
+    const top = lines.indexOf("jobs:");
+    if (top === -1) {
+      return [];
+    }
+    const header = /^ {2}([a-z][\w-]*):$/;
+    const starts = lines
+      .map((line, index) => (index > top && header.test(line) ? index : -1))
+      .filter((index) => index >= 0);
+    return starts.map((start, order) => {
+      const block = lines.slice(start, starts[order + 1] ?? lines.length);
+      const condition = block.find((line) => /^ {4}if: /.test(line))?.replace(/^ {4}if: /, "") ?? "";
+      const needsLine = block.find((line) => /^ {4}needs: /.test(line))?.replace(/^ {4}needs: /, "") ?? "";
+      const needs = needsLine
+        .replace(/[[\]]/g, "")
+        .split(",")
+        .map((name) => name.trim())
+        .filter((name) => name !== "");
+      return {
+        file: file.name,
+        name: (header.exec(lines[start] as string) as RegExpExecArray)[1] as string,
+        condition,
+        needs,
+        publishes: runText(block).some((line) => line.includes("npm publish")),
+      };
+    });
+  }
+
+  function dependsOnPublisher(job: Job, jobs: readonly Job[], seen = new Set<string>()): boolean {
+    return job.needs.some((name) => {
+      const needed = jobs.find((candidate) => candidate.name === name);
+      if (!needed || seen.has(name)) {
+        return false;
+      }
+      seen.add(name);
+      return needed.publishes || dependsOnPublisher(needed, jobs, seen);
+    });
+  }
+
+  function releaseJobViolations(jobs: readonly Job[]): string[] {
+    const violations: string[] = [];
+    const decide = jobs.find((job) => job.name === "decide");
+    if (!decide?.condition.includes(UPSTREAM)) {
+      violations.push("release.yml: decide has no upstream condition");
+    }
+    const release = jobs.find((job) => job.name === "release");
+    const clauses = release?.condition.split("&&").map((clause) => clause.trim()) ?? [];
+    if (!clauses.includes(UPSTREAM) || !clauses.includes(RELEASED)) {
+      violations.push("release.yml: release does not combine the upstream condition with the release plan");
+    }
+    return violations;
+  }
+
+  function jobViolations(file: string, job: Job, jobs: readonly Job[]): string[] {
+    const violations: string[] = [];
+    if (job.publishes && !job.condition.includes(UPSTREAM)) {
+      violations.push(`${file}: ${job.name} runs npm publish without the upstream condition`);
+    }
+    if (dependsOnPublisher(job, jobs) && /\b(always|failure|cancelled)\(\)/.test(job.condition)) {
+      violations.push(`${file}: ${job.name} depends on a publishing job and can run when it did not`);
+    }
+    return violations;
+  }
+
+  function publishViolations(files: readonly WorkflowFile[]): string[] {
+    return files.flatMap((file) => {
+      const jobs = jobsOf(file);
+      return [
+        ...(file.name === "release.yml" ? releaseJobViolations(jobs) : []),
+        ...jobs.flatMap((job) => jobViolations(file.name, job, jobs)),
+      ];
+    });
+  }
+
+  function workflowFiles(): WorkflowFile[] {
+    const dir = join(repoRoot, ".github", "workflows");
+    return readdirSync(dir)
+      .filter((name) => name.endsWith(".yml"))
+      .map((name) => ({ name, text: readFileSync(join(dir, name), "utf8") }));
+  }
+
+  function withRelease(edit: (text: string) => string): WorkflowFile[] {
+    return workflowFiles().map((file) =>
+      file.name === "release.yml" ? { ...file, text: edit(file.text) } : file,
+    );
+  }
+
+  test("AGF-61 every workflow on disk carries the guard", () => {
+    const files = workflowFiles();
+    assert.ok(
+      files.some((file) => jobsOf(file).some((job) => job.publishes)),
+      "no job publishes — vacuous",
+    );
+    assert.deepEqual(publishViolations(files), []);
+  });
+
+  test("AGF-62 removing the condition from decide is caught", () => {
+    const files = withRelease((text) =>
+      text.replace(`    if: ${UPSTREAM}\n    permissions:`, "    permissions:"),
+    );
+    assert.notDeepEqual(files, workflowFiles());
+    assert.ok(publishViolations(files).some((line) => line.includes("decide")));
+  });
+
+  test("AGF-62 removing the condition from release is caught", () => {
+    const files = withRelease((text) => text.replace(`if: ${UPSTREAM} && ${RELEASED}`, `if: ${RELEASED}`));
+    assert.notDeepEqual(files, workflowFiles());
+    const violations = publishViolations(files);
+    assert.ok(violations.some((line) => line.includes("release does not combine")));
+    assert.ok(violations.some((line) => line.includes("release runs npm publish")));
+  });
+
+  test("AGF-62 a publishing job in another workflow loses its condition and is caught", () => {
+    const guarded = [
+      "jobs:",
+      "  ship:",
+      `    if: ${UPSTREAM}`,
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm publish",
+      "",
+    ].join("\n");
+    const files = [...workflowFiles(), { name: "other.yml", text: guarded }];
+    assert.deepEqual(publishViolations(files), []);
+
+    const unguarded = guarded.replace(`    if: ${UPSTREAM}\n`, "");
+    const violations = publishViolations([...workflowFiles(), { name: "other.yml", text: unguarded }]);
+    assert.deepEqual(violations, ["other.yml: ship runs npm publish without the upstream condition"]);
+  });
+
+  test("AGF-62 a new job with npm publish in a block run and no condition is caught", () => {
+    const added = [
+      "jobs:",
+      "  sneak:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - name: Publish",
+      "        run: |",
+      "          npm ci",
+      "          npm publish --access public",
+      "",
+    ].join("\n");
+    const violations = publishViolations([...workflowFiles(), { name: "sneak.yml", text: added }]);
+    assert.deepEqual(violations, ["sneak.yml: sneak runs npm publish without the upstream condition"]);
+  });
+
+  test("AGF-61 a job downstream of the publisher cannot force itself to run", () => {
+    const files = withRelease((text) =>
+      text.replace(
+        `    needs: [decide, release]\n    if: ${RELEASED}`,
+        `    needs: [decide, release]\n    if: always()`,
+      ),
+    );
+    assert.notDeepEqual(files, workflowFiles());
+    assert.ok(publishViolations(files).some((line) => line.includes("smoke depends on a publishing job")));
+  });
+});
+
+/**
  * The class, not the instance: a `run:` block on a job that runs on more than one operating system must not
  * substitute a variable, because `$NAME` is an environment variable in bash and a *shell* variable in PowerShell.
  *

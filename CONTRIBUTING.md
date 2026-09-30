@@ -139,7 +139,9 @@ fails there, which is exactly what happened — twice — and the check worked b
 
 ## Releasing
 
-A push to `main` releases. Nothing to run, nothing to approve, and no credential anywhere: trusted publishing mints
+A push to `main` of `tech-leads-club/harness-toolkit` releases. The workflow publishes only from
+`tech-leads-club/harness-toolkit`: its `decide` and `release` jobs carry a repository condition, so a push to `main`
+of a fork never reaches `npm publish`. Nothing to run, nothing to approve, and no credential anywhere: trusted publishing mints
 a short-lived OIDC token per run and npm checks it against the registered publisher — organisation, repository,
 workflow filename, environment name — so there is no stored secret to steal and nothing to rotate. Provenance is
 generated from that same identity ([/decisions/ad-102.md](/decisions/ad-102.md)).
