@@ -57,5 +57,44 @@ export type RuntimeDecision =
 
 export function decideRuntime(input: RuntimeDecisionInput): RuntimeDecision;
 
-export function main(argv?: string[]): void;
+export function main(argv?: string[]): void | Promise<void>;
 export const HOOK_ENTRIES: Set<string>;
+
+export type FailClosedHost = {
+  prefix: string;
+  deadlineMs: Record<string, number>;
+  fallbackDeadlineMs: number;
+};
+
+export const FAIL_CLOSED_HOSTS: FailClosedHost[];
+
+export function failClosedHostFor(entry: string, token: string | undefined): { prefix: string; deadlineMs: number } | null;
+
+export function failClosedVerdict(cause: string): string;
+
+export function isHostVerdict(text: string): boolean;
+
+export function childEnv(harnessHome: string, origin: string): Record<string, string | undefined>;
+
+export type CapturedChild = {
+  stdout?: { on(event: "data", listener: (chunk: { toString(): string }) => void): unknown } | null;
+  kill(): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "close", listener: (code: number | null, signal: string | null) => void): unknown;
+};
+
+export type CaptureDeps = {
+  spawn: (command: string, args: string[], options: Record<string, unknown>) => CapturedChild;
+  write: (text: string, done: () => void) => unknown;
+  writeErr: (line: string) => void;
+  exit: (code: number) => void;
+  setTimer: (fn: () => void, ms: number) => unknown;
+  clearTimer: (handle: unknown) => void;
+};
+
+export function runCaptured(
+  command: string,
+  args: string[],
+  options: { env: Record<string, string | undefined>; deadlineMs: number },
+  deps?: CaptureDeps,
+): Promise<void>;

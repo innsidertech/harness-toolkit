@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -162,6 +162,9 @@ export function resolveEntrySource(harnessHome, entry) {
  *
  * invariant: this list is checked against `src/entrypoints/` by the gate, so an entrypoint added later cannot be
  * left out of it — a hook missing from here fails closed, which is the direction that blocks a working machine.
+ *
+ * hazard: one host reads silence and `{}` the other way round, so for its tokens a hook that cannot run refuses
+ * instead of carrying on — the per-host exception in [/decisions/ad-156.md](/decisions/ad-156.md).
  */
 export const HOOK_ENTRIES = new Set([
   "compact-before",
@@ -185,10 +188,156 @@ export const HOOK_ENTRIES = new Set([
  * runtime used to emit nothing at all with exit 1, which Claude treats as a non-blocking error and Cursor's
  * contract does not describe. A harness that cannot run was protecting nothing, so it must not be the thing that
  * stops the turn ([/decisions/ad-101.md](/decisions/ad-101.md)).
+ *
+ * hazard: never for a fail-closed host's token. There `{}` denies and nothing allows, so this would read as a
+ * verdict the harness never reached ([/decisions/ad-156.md](/decisions/ad-156.md)).
  */
 function carryOn() {
   process.stdout.write("{}");
   process.exit(0);
+}
+
+/**
+ * Hosts whose hook output is read so that a silent or broken hook lets the tool run.
+ *
+ * invariant: the prefix is the literal the provider's wiring writes into the token after the handler, and a test
+ * holds the two equal. The deadlines sit two seconds under the wired timeouts (10, 10, 120 s) so the refusal is
+ * written before the host gives up on the hook ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+export const FAIL_CLOSED_HOSTS = [
+  {
+    prefix: "antigravity:",
+    deadlineMs: { "antigravity:PreToolUse": 8000, "antigravity:PostToolUse": 8000, "antigravity:Stop": 118000 },
+    fallbackDeadlineMs: 8000,
+  },
+];
+
+/** null unless the entry answers a host hook and the token carries a fail-closed prefix. */
+export function failClosedHostFor(entry, token) {
+  if (!HOOK_ENTRIES.has(entry) || typeof token !== "string") {
+    return null;
+  }
+  const host = FAIL_CLOSED_HOSTS.find((candidate) => token.startsWith(candidate.prefix));
+  if (host === undefined) {
+    return null;
+  }
+  return { prefix: host.prefix, deadlineMs: host.deadlineMs[token] ?? host.fallbackDeadlineMs };
+}
+
+export function failClosedVerdict(cause) {
+  return JSON.stringify({ decision: "deny", reason: `tlc-harness: ${cause}` });
+}
+
+/** Exactly one JSON object whose decision is allow, or deny with a string reason. */
+export function isHostVerdict(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return false;
+  }
+  const keys = Object.keys(parsed);
+  if (parsed.decision === "allow") {
+    return keys.length === 1;
+  }
+  return parsed.decision === "deny" && typeof parsed.reason === "string" && keys.length === 2;
+}
+
+export function childEnv(harnessHome, origin) {
+  return {
+    ...process.env,
+    TLC_HOME: harnessHome,
+    // why: `TLC_ORIGIN` is where this copy physically lives, which is not `TLC_HOME` once an npm-installed shim
+    // is driving the runtime installed under the conventional path. `tlc harness install` needs the former as
+    // its source and the latter as its destination, and nothing else in the runtime reads it.
+    TLC_ORIGIN: origin,
+    // hazard: derived once, by the outermost launcher, and inherited after that. `tlc harness install` reaches
+    // the tool through the CLI, so the launcher runs twice — and the second one saw the `TLC_HOME` the first
+    // one had just set, concluded the operator had chosen it, and installed the runtime on top of itself.
+    // Measured against the packed tarball: "runtime already at <package> — nothing to copy".
+    TLC_HOME_FROM_ENV: process.env.TLC_HOME_FROM_ENV ?? (process.env.TLC_HOME?.trim() ? "1" : "0"),
+  };
+}
+
+const CAPTURE_DEPS = {
+  spawn,
+  write: (text, done) => process.stdout.write(text, done),
+  writeErr: (line) => console.error(line),
+  exit: (code) => process.exit(code),
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: (handle) => clearTimeout(handle),
+};
+
+/**
+ * Runs a fail-closed host's hook child with its stdout held back, so exactly one verdict ever reaches the host.
+ *
+ * hazard: with stdout inherited, a child that crashes after a partial write, prints nothing, or outlives the
+ * host's timeout leaves the host reading silence — which this host treats as permission. Holding the output
+ * until the child exits is what lets every one of those paths end in an explicit refusal instead.
+ *
+ * invariant: the promise never rejects, and the `settled` guard means a late `close` after a timeout or a spawn
+ * error cannot write a second verdict.
+ */
+export function runCaptured(command, args, { env, deadlineMs }, deps = CAPTURE_DEPS) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let out = "";
+    const finish = (text) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      deps.write(`${text}\n`, () => {
+        deps.exit(0);
+        resolve();
+      });
+    };
+    let child;
+    try {
+      child = deps.spawn(command, args, { stdio: ["inherit", "pipe", "inherit"], env, shell: false });
+    } catch (error) {
+      deps.writeErr(`tlc: failed to start ${command}: ${error instanceof Error ? error.message : String(error)}`);
+      finish(failClosedVerdict("launcher-error"));
+      return;
+    }
+    const timer = deps.setTimer(() => {
+      if (settled) {
+        return;
+      }
+      child.kill();
+      deps.writeErr(`tlc: hook child exceeded ${deadlineMs} ms`);
+      finish(failClosedVerdict("timeout"));
+    }, deadlineMs);
+    child.stdout?.on("data", (chunk) => {
+      out += chunk.toString();
+    });
+    child.on("error", (error) => {
+      deps.clearTimer(timer);
+      deps.writeErr(`tlc: failed to start ${command}: ${error.message}`);
+      finish(failClosedVerdict("launcher-error"));
+    });
+    child.on("close", (code, signal) => {
+      deps.clearTimer(timer);
+      if (settled) {
+        return;
+      }
+      if (code === 0 && signal === null && isHostVerdict(out.trim())) {
+        finish(out.trim());
+        return;
+      }
+      const why =
+        signal !== null
+          ? `killed by ${signal}`
+          : code !== 0
+            ? `exited with ${code}`
+            : "no single allow/deny verdict";
+      deps.writeErr(`tlc: hook child ${why}`);
+      finish(failClosedVerdict("launcher-error"));
+    });
+  });
 }
 
 export function decideRuntime({ harnessHome, entry, bunPath, nodeMajor, distExists, srcPath }) {
@@ -237,19 +386,7 @@ export function decideRuntime({ harnessHome, entry, bunPath, nodeMajor, distExis
 function run(harnessHome, command, commandArgs, origin = harnessHome, entry = "") {
   const result = spawnSync(command, commandArgs, {
     stdio: "inherit",
-    // why: `TLC_ORIGIN` is where this copy physically lives, which is not `TLC_HOME` once an npm-installed shim
-    // is driving the runtime installed under the conventional path. `tlc harness install` needs the former as
-    // its source and the latter as its destination, and nothing else in the runtime reads it.
-    env: {
-      ...process.env,
-      TLC_HOME: harnessHome,
-      TLC_ORIGIN: origin,
-      // hazard: derived once, by the outermost launcher, and inherited after that. `tlc harness install` reaches
-      // the tool through the CLI, so the launcher runs twice — and the second one saw the `TLC_HOME` the first
-      // one had just set, concluded the operator had chosen it, and installed the runtime on top of itself.
-      // Measured against the packed tarball: "runtime already at <package> — nothing to copy".
-      TLC_HOME_FROM_ENV: process.env.TLC_HOME_FROM_ENV ?? (process.env.TLC_HOME?.trim() ? "1" : "0"),
-    },
+    env: childEnv(harnessHome, origin),
     shell: false,
   });
   if (result.error) {
@@ -273,6 +410,7 @@ export function main(argv = process.argv) {
     process.exit(2);
   }
   const args = argv.slice(3);
+  const failClosed = failClosedHostFor(entry, args[0]);
 
   const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
   const distExists = existsSync(join(harnessHome, "dist", `${entry}.mjs`));
@@ -283,10 +421,20 @@ export function main(argv = process.argv) {
   if (decision.kind === "error") {
     // invariant: the diagnosis still reaches stderr either way. Failing open is not failing silently.
     console.error(decision.message);
+    if (failClosed !== null) {
+      process.stdout.write(`${failClosedVerdict("launcher-error")}\n`, () => process.exit(0));
+      return;
+    }
     if (HOOK_ENTRIES.has(entry)) {
       carryOn();
     }
     process.exit(decision.status);
+  }
+  if (failClosed !== null) {
+    return runCaptured(decision.command, [...decision.args, ...args], {
+      env: childEnv(harnessHome, join(binDir, "..")),
+      deadlineMs: failClosed.deadlineMs,
+    });
   }
   run(harnessHome, decision.command, [...decision.args, ...args], join(binDir, ".."), entry);
 }
