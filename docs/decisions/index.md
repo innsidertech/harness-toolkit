@@ -153,6 +153,7 @@ Handoff section and a link back to this index.
 | [AD-143](/decisions/ad-143.md) | a session with no usage source reads as unavailable, not as $0.0000 | active |
 | [AD-144](/decisions/ad-144.md) | turn_base_sha records the git root it came from, and a mismatch falls back to HEAD | active |
 | [AD-145](/decisions/ad-145.md) | a session's last real shell cwd is recalled wherever the host reports none | active |
+| [AD-156](/decisions/ad-156.md) | Antigravity is a provider whose every harness failure is a refusal | active |
 
 ## Archived
 

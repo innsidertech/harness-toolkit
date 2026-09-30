@@ -6,6 +6,10 @@ Each entry is an architectural decision record: what changed, why, what was refu
 A **Needs your action** line is a change `tlc harness doctor` cannot detect for you; everything else
 doctor reports against your own configuration.
 
+## Unreleased
+
+- **AD-156** — Antigravity is a provider whose every harness failure is a refusal
+
 ## v0.16.2
 
 - **AD-145** — a session's last real shell cwd is recalled wherever the host reports none
