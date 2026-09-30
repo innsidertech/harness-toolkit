@@ -13,7 +13,11 @@ import {
   isHostVerdict,
   runCaptured,
 } from "../../bin/tlc-exec.mjs";
-import { ANTIGRAVITY_EVENT_PREFIX } from "../../src/providers/antigravity/antigravity.events.ts";
+import {
+  ANTIGRAVITY_EVENT_PREFIX,
+  ANTIGRAVITY_SILENT_SUCCESS_EVENTS,
+  hostEventToken,
+} from "../../src/providers/antigravity/antigravity.events.ts";
 import { renderAntigravityFailure } from "../../src/providers/antigravity/antigravity.outbound.ts";
 import { antigravityWiring } from "../../src/providers/antigravity/antigravity.wiring.ts";
 
@@ -58,26 +62,56 @@ describe("the launcher under a fail-closed host's token", () => {
     assert.equal(result.status, 0);
   });
 
-  test("AGH-02: a child that exits 0 without a single verdict refuses with launcher-error", () => {
+  test("AGH-02: at PreToolUse a child that exits 0 without a single verdict refuses with launcher-error", () => {
     for (const [name, body] of [
-      ["silent", ""],
-      ["empty-object", 'process.stdout.write("{}");\n'],
-      ["two", 'process.stdout.write(\'{"decision":"allow"}{"decision":"allow"}\');\n'],
+      ["pre-silent", ""],
+      ["pre-empty-object", 'process.stdout.write("{}");\n'],
+      ["pre-two", 'process.stdout.write(\'{"decision":"allow"}{"decision":"allow"}\');\n'],
     ] as const) {
-      const result = launch(homeWith(name, body), "antigravity:PostToolUse");
+      const result = launch(homeWith(name, body), "antigravity:PreToolUse");
       assert.equal(result.stdout.trim(), deny("launcher-error"), name);
       assert.equal(result.status, 0, name);
     }
   });
 
+  test("AGH-02: at PostToolUse and Stop, exit 1, {}, an allow object or a lone newline refuse with launcher-error", () => {
+    for (const token of ["antigravity:PostToolUse", "antigravity:Stop"]) {
+      for (const [name, body] of [
+        ["exit1", "process.exit(1);\n"],
+        ["empty-object", 'process.stdout.write("{}");\n'],
+        ["allow", 'process.stdout.write(\'{"decision":"allow"}\\n\');\n'],
+        ["newline", 'process.stdout.write("\\n");\n'],
+      ] as const) {
+        const result = launch(homeWith(`${token.slice(12)}-${name}`, body), token);
+        assert.equal(result.stdout.trim(), deny("launcher-error"), `${token} ${name}`);
+        assert.equal(result.status, 0, `${token} ${name}`);
+      }
+    }
+  });
+
+  test("D-B: at PostToolUse and Stop a child that exits 0 with zero bytes is success — zero bytes, exit 0", () => {
+    for (const token of ["antigravity:PostToolUse", "antigravity:Stop"]) {
+      const result = launch(homeWith(`${token.slice(12)}-silent`, ""), token);
+      assert.equal(result.stdout, "", token);
+      assert.equal(result.status, 0, token);
+    }
+  });
+
   test("a child's own verdict passes through once, unchanged", () => {
     const verdict = '{"decision":"deny","reason":"rule=wiring-tamper"}';
-    const result = launch(
-      homeWith("verdict", `process.stdout.write(${JSON.stringify(`${verdict}\n`)});\n`),
-      "antigravity:Stop",
+    for (const token of ["antigravity:PreToolUse", "antigravity:PostToolUse", "antigravity:Stop"]) {
+      const result = launch(
+        homeWith(`${token.slice(12)}-verdict`, `process.stdout.write(${JSON.stringify(`${verdict}\n`)});\n`),
+        token,
+      );
+      assert.equal(result.stdout, `${verdict}\n`, token);
+      assert.equal(result.status, 0);
+    }
+    const allow = launch(
+      homeWith("pre-allow", 'process.stdout.write(\'{"decision":"allow"}\\n\');\n'),
+      "antigravity:PreToolUse",
     );
-    assert.equal(result.stdout, `${verdict}\n`);
-    assert.equal(result.status, 0);
+    assert.equal(allow.stdout, '{"decision":"allow"}\n');
   });
 
   test("AGH-12: without the prefix a broken runtime still carries on with {} for every hook", () => {
@@ -110,18 +144,45 @@ function capturingDeps(capture: Capture): CaptureDeps {
 }
 
 describe("runCaptured", () => {
-  test("AGH-03: a child past its deadline is killed and the host gets exactly one timeout refusal", async () => {
+  test("AGH-03: a child past its deadline is killed and the host gets exactly one timeout refusal, on every event", async () => {
+    for (const silentSuccess of [false, true]) {
+      const capture: Capture = { out: [], err: [], exits: [] };
+      await runCaptured(
+        process.execPath,
+        ["-e", "setTimeout(() => {}, 2000)"],
+        { env: process.env, deadlineMs: 300, silentSuccess },
+        capturingDeps(capture),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.deepEqual(capture.out, [`${deny("timeout")}\n`], `silentSuccess ${silentSuccess}`);
+      assert.deepEqual(capture.exits, [0]);
+      assert.match(capture.err.join("\n"), /exceeded 300 ms/);
+    }
+  });
+
+  test("D-B: with silentSuccess a child that writes nothing and exits 0 ends in zero bytes and exit 0", async () => {
     const capture: Capture = { out: [], err: [], exits: [] };
     await runCaptured(
       process.execPath,
-      ["-e", 'setTimeout(() => process.stdout.write(\'{"decision":"allow"}\'), 20000)'],
-      { env: process.env, deadlineMs: 300 },
+      ["-e", ""],
+      { env: process.env, deadlineMs: 5000, silentSuccess: true },
       capturingDeps(capture),
     );
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.deepEqual(capture.out, [`${deny("timeout")}\n`]);
+    assert.deepEqual(capture.out, []);
     assert.deepEqual(capture.exits, [0]);
-    assert.match(capture.err.join("\n"), /exceeded 300 ms/);
+    assert.deepEqual(capture.err, []);
+  });
+
+  test("without silentSuccess the same silent child is a launcher error", async () => {
+    const capture: Capture = { out: [], err: [], exits: [] };
+    await runCaptured(
+      process.execPath,
+      ["-e", ""],
+      { env: process.env, deadlineMs: 5000 },
+      capturingDeps(capture),
+    );
+    assert.deepEqual(capture.out, [`${deny("launcher-error")}\n`]);
+    assert.deepEqual(capture.exits, [0]);
   });
 
   test("AGH-02: a command that cannot start refuses with launcher-error", async () => {
@@ -158,6 +219,14 @@ describe("runCaptured", () => {
     assert.equal(failClosedHostFor("tool-before", "antigravity:Other")?.deadlineMs, host.fallbackDeadlineMs);
   });
 
+  test("AGH-07: silentSuccess is true only at PostToolUse and Stop, false at PreToolUse and at an unknown token", () => {
+    assert.equal(failClosedHostFor("tool-before", "antigravity:PreToolUse")?.silentSuccess, false);
+    assert.equal(failClosedHostFor("tool-after", "antigravity:PostToolUse")?.silentSuccess, true);
+    assert.equal(failClosedHostFor("stop", "antigravity:Stop")?.silentSuccess, true);
+    assert.equal(failClosedHostFor("tool-before", "antigravity:Other")?.silentSuccess, false);
+    assert.equal(failClosedHostFor("tool-before", "antigravity:PreInvocation")?.silentSuccess, false);
+  });
+
   test("only a hook entry with a prefixed token is fail-closed", () => {
     assert.equal(failClosedHostFor("tool-before", "PreToolUse"), null);
     assert.equal(failClosedHostFor("tool-before", undefined), null);
@@ -165,11 +234,13 @@ describe("runCaptured", () => {
     assert.notEqual(failClosedHostFor("stop", "antigravity:Stop"), null);
   });
 
-  test("isHostVerdict accepts exactly one allow or one deny with a reason", () => {
-    assert.equal(isHostVerdict('{"decision":"allow"}'), true);
-    assert.equal(isHostVerdict('{"decision":"deny","reason":"r"}'), true);
+  test("AGH-07: before a tool isHostVerdict accepts exactly one allow or one deny with a reason, never zero bytes", () => {
+    assert.equal(isHostVerdict('{"decision":"allow"}', false), true);
+    assert.equal(isHostVerdict('{"decision":"deny","reason":"r"}', false), true);
     for (const text of [
       "",
+      "\n",
+      " ",
       "{}",
       '{"decision":"deny"}',
       '{"decision":"ask","reason":"r"}',
@@ -177,7 +248,24 @@ describe("runCaptured", () => {
       "x",
       '{"decision":"allow","x":1}',
     ]) {
-      assert.equal(isHostVerdict(text), false, text);
+      assert.equal(isHostVerdict(text, false), false, JSON.stringify(text));
+    }
+  });
+
+  test("AGH-07: after a tool and at Stop isHostVerdict accepts zero bytes or one deny, never allow, {} or a newline", () => {
+    assert.equal(isHostVerdict("", true), true);
+    assert.equal(isHostVerdict('{"decision":"deny","reason":"r"}', true), true);
+    for (const text of [
+      "\n",
+      " ",
+      "{}",
+      '{"decision":"allow"}',
+      '{"decision":"deny"}',
+      '{"decision":"ask","reason":"r"}',
+      "[]",
+      "x",
+    ]) {
+      assert.equal(isHostVerdict(text, true), false, JSON.stringify(text));
     }
   });
 });
@@ -197,5 +285,12 @@ describe("AGH-82: the launcher's literals match the adapter", () => {
     for (const entry of antigravityWiring({ launcherPath: "/x/tlc-exec.mjs" }).entries) {
       assert.ok(entry.args[2]?.startsWith(FAIL_CLOSED_HOSTS[0]?.prefix ?? "\0"), entry.hookEvent);
     }
+  });
+
+  test("the launcher's silent-success tokens are the adapter's silent-success events", () => {
+    assert.deepEqual(
+      FAIL_CLOSED_HOSTS[0]?.silentSuccessTokens,
+      ANTIGRAVITY_SILENT_SUCCESS_EVENTS.map(hostEventToken),
+    );
   });
 });

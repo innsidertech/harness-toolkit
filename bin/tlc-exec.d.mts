@@ -64,15 +64,19 @@ export type FailClosedHost = {
   prefix: string;
   deadlineMs: Record<string, number>;
   fallbackDeadlineMs: number;
+  silentSuccessTokens: string[];
 };
 
 export const FAIL_CLOSED_HOSTS: FailClosedHost[];
 
-export function failClosedHostFor(entry: string, token: string | undefined): { prefix: string; deadlineMs: number } | null;
+export function failClosedHostFor(
+  entry: string,
+  token: string | undefined,
+): { prefix: string; deadlineMs: number; silentSuccess: boolean } | null;
 
 export function failClosedVerdict(cause: string): string;
 
-export function isHostVerdict(text: string): boolean;
+export function isHostVerdict(text: string, silentSuccess?: boolean): boolean;
 
 export function childEnv(harnessHome: string, origin: string): Record<string, string | undefined>;
 
@@ -95,6 +99,6 @@ export type CaptureDeps = {
 export function runCaptured(
   command: string,
   args: string[],
-  options: { env: Record<string, string | undefined>; deadlineMs: number },
+  options: { env: Record<string, string | undefined>; deadlineMs: number; silentSuccess?: boolean },
   deps?: CaptureDeps,
 ): Promise<void>;

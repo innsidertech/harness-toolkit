@@ -203,12 +203,16 @@ function carryOn() {
  * invariant: the prefix is the literal the provider's wiring writes into the token after the handler, and a test
  * holds the two equal. The deadlines sit two seconds under the wired timeouts (10, 10, 120 s) so the refusal is
  * written before the host gives up on the hook ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ *
+ * `silentSuccessTokens` are the events whose success is zero bytes: after a tool and at Stop the host reads any
+ * JSON as the tool's result or a verdict. A test holds them equal to the provider's own list.
  */
 export const FAIL_CLOSED_HOSTS = [
   {
     prefix: "antigravity:",
     deadlineMs: { "antigravity:PreToolUse": 8000, "antigravity:PostToolUse": 8000, "antigravity:Stop": 118000 },
     fallbackDeadlineMs: 8000,
+    silentSuccessTokens: ["antigravity:PostToolUse", "antigravity:Stop"],
   },
 ];
 
@@ -221,15 +225,28 @@ export function failClosedHostFor(entry, token) {
   if (host === undefined) {
     return null;
   }
-  return { prefix: host.prefix, deadlineMs: host.deadlineMs[token] ?? host.fallbackDeadlineMs };
+  return {
+    prefix: host.prefix,
+    deadlineMs: host.deadlineMs[token] ?? host.fallbackDeadlineMs,
+    silentSuccess: host.silentSuccessTokens.includes(token),
+  };
 }
 
 export function failClosedVerdict(cause) {
   return JSON.stringify({ decision: "deny", reason: `tlc-harness: ${cause}` });
 }
 
-/** Exactly one JSON object whose decision is allow, or deny with a string reason. */
-export function isHostVerdict(text) {
+/**
+ * silentSuccess false: exactly one JSON object whose decision is allow, or deny with a string reason.
+ * silentSuccess true: zero bytes, or exactly one JSON object whose decision is deny with a string reason.
+ *
+ * hazard: before a tool, zero bytes lets the tool run, so there it is never a verdict. A lone newline or spaces
+ * are not zero bytes on any event.
+ */
+export function isHostVerdict(text, silentSuccess = false) {
+  if (text === "") {
+    return silentSuccess;
+  }
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -241,7 +258,7 @@ export function isHostVerdict(text) {
   }
   const keys = Object.keys(parsed);
   if (parsed.decision === "allow") {
-    return keys.length === 1;
+    return !silentSuccess && keys.length === 1;
   }
   return parsed.decision === "deny" && typeof parsed.reason === "string" && keys.length === 2;
 }
@@ -272,7 +289,7 @@ const CAPTURE_DEPS = {
 };
 
 /**
- * Runs a fail-closed host's hook child with its stdout held back, so exactly one verdict ever reaches the host.
+ * Runs a fail-closed host's hook child with its stdout held back, so at most one verdict ever reaches the host.
  *
  * hazard: with stdout inherited, a child that crashes after a partial write, prints nothing, or outlives the
  * host's timeout leaves the host reading silence — which this host treats as permission. Holding the output
@@ -280,8 +297,11 @@ const CAPTURE_DEPS = {
  *
  * invariant: the promise never rejects, and the `settled` guard means a late `close` after a timeout or a spawn
  * error cannot write a second verdict.
+ *
+ * With `silentSuccess`, a child that exits 0 having written nothing is the event's success, and the launcher
+ * writes nothing either. Without it, the same child is a launcher error.
  */
-export function runCaptured(command, args, { env, deadlineMs }, deps = CAPTURE_DEPS) {
+export function runCaptured(command, args, { env, deadlineMs, silentSuccess = false }, deps = CAPTURE_DEPS) {
   return new Promise((resolve) => {
     let settled = false;
     let out = "";
@@ -294,6 +314,14 @@ export function runCaptured(command, args, { env, deadlineMs }, deps = CAPTURE_D
         deps.exit(0);
         resolve();
       });
+    };
+    const finishSilently = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      deps.exit(0);
+      resolve();
     };
     let child;
     try {
@@ -324,7 +352,11 @@ export function runCaptured(command, args, { env, deadlineMs }, deps = CAPTURE_D
       if (settled) {
         return;
       }
-      if (code === 0 && signal === null && isHostVerdict(out.trim())) {
+      if (code === 0 && signal === null && isHostVerdict(out, silentSuccess)) {
+        if (out === "") {
+          finishSilently();
+          return;
+        }
         finish(out.trim());
         return;
       }
@@ -333,7 +365,7 @@ export function runCaptured(command, args, { env, deadlineMs }, deps = CAPTURE_D
           ? `killed by ${signal}`
           : code !== 0
             ? `exited with ${code}`
-            : "no single allow/deny verdict";
+            : "no verdict accepted for this event";
       deps.writeErr(`tlc: hook child ${why}`);
       finish(failClosedVerdict("launcher-error"));
     });
@@ -434,6 +466,7 @@ export function main(argv = process.argv) {
     return runCaptured(decision.command, [...decision.args, ...args], {
       env: childEnv(harnessHome, join(binDir, "..")),
       deadlineMs: failClosed.deadlineMs,
+      silentSuccess: failClosed.silentSuccess,
     });
   }
   run(harnessHome, decision.command, [...decision.args, ...args], join(binDir, ".."), entry);
