@@ -197,7 +197,7 @@ test("registry starts with only genuinely registered providers, each satisfying 
   }
 });
 
-test("the registry carries the three hosts in detection order", () => {
+test("AGH-55: the registry carries the three hosts in detection order, so every contract and conformance test above and beside this one covers antigravity", () => {
   assert.deepEqual(
     providers.map((provider) => provider.name),
     ["cursor", "claude", "antigravity"],

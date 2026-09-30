@@ -8,6 +8,7 @@ import type { HarnessEvent } from "../../contracts/index.ts";
 import { projectStateDir } from "../../platform/paths.ts";
 import { type ProviderPort, providers } from "../../providers/index.ts";
 import { composeProtectedPaths, type Handler, hostEventOf, runHandler } from "../run.ts";
+import { stopHandler } from "../stop.ts";
 import { toolBeforeHandler } from "../tool-before.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -289,7 +290,32 @@ test("hostEventOf reads the token after the handler", () => {
   assert.equal(hostEventOf(["node", "tool-before.ts"]), undefined);
 });
 
-test("composeProtectedPaths joins every provider's targets with the project targets of the event's directory", () => {
+test("AGH-78: two identical Stops each run the stop handler to the end, with no deduplication key", async () => {
+  await inScene(async (scene) => {
+    const idle = fixtureWhere("antigravity:Stop", (event) => event.event === "stop");
+    let runs = 0;
+    const counted: Handler = async (event, ctx) => {
+      runs += 1;
+      return stopHandler(event, ctx);
+    };
+    const text = inWorkspace(idle, scene.root);
+    const first = await runHandler(counted, io(scene, text, "antigravity:Stop"));
+    const second = await runHandler(counted, io(scene, text, "antigravity:Stop"));
+    assert.equal(runs, 2);
+    assert.deepEqual(scene.stderr, []);
+    assert.equal(first.rendered.stdout, '{"decision":"allow"}');
+    assert.equal(second.rendered.stdout, '{"decision":"allow"}');
+    assert.equal(first.failure, undefined);
+    assert.equal(second.failure, undefined);
+  });
+  for (const file of ["antigravity.inbound.ts", "antigravity.detect.ts", "antigravity.failure.ts"]) {
+    const source = readFileSync(join(FIXTURE_DIR, "..", "..", file), "utf8");
+    assert.ok(!source.includes("fullyIdle"), file);
+    assert.ok(!/new (Set|Map)\b/.test(source), file);
+  }
+});
+
+test("AGH-83: composeProtectedPaths joins every provider's targets with the project targets of the event's directory", () => {
   const paths = composeProtectedPaths(providers, "/w");
   for (const provider of providers) {
     for (const target of provider.wiringTargets()) {
