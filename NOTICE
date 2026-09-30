@@ -7,3 +7,10 @@ Licensed under the Elastic License 2.0. See LICENSE.
   condition of the licence, not a courtesy.
 - Do not provide the software to third parties as a hosted or managed service that gives them access to
   a substantial set of its features.
+
+Modification notice (Elastic License 2.0): innsidertech/harness-toolkit
+(https://github.com/innsidertech/harness-toolkit) modified this software, starting 2026-09-30.
+Scope: the Antigravity provider (src/providers/antigravity/) and the changes it required
+elsewhere - the floor's Windows shell verbs (src/core/floor/), install, doctor and uninstall
+support, tests, documentation and the release workflow. The copyright and licence notices
+above are unchanged.

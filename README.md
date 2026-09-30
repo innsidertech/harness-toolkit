@@ -585,6 +585,8 @@ Full OKF v0.1 documentation bundle: [`docs/index.md`](docs/index.md).
 
 **Elastic License 2.0** — [`LICENSE`](./LICENSE), [`NOTICE`](./NOTICE).
 
+Modified by [innsidertech/harness-toolkit](https://github.com/innsidertech/harness-toolkit) since 2026-09-30: the Antigravity provider and the changes it required. See [`NOTICE`](./NOTICE).
+
 | Allowed | Not allowed |
 |---------|-------------|
 | Use, change and redistribute it, inside a company and commercially, at no cost | Providing it to third parties as a hosted or managed service |
