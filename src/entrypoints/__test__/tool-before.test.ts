@@ -736,6 +736,56 @@ test("an Edit tool call against Claude's real wiring target is denied end-to-end
 });
 
 /**
+ * AGH-43 and AGH-44 — every provider's session protects the fail-closed host's global hooks file and the event's
+ * own `<projectDir>/.agents/hooks.json`. An intentional change for Cursor and Claude
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+for (const [label, build] of [
+  [
+    "Claude",
+    (root: string, tool: string, filePath: string) =>
+      claudeTool(root, { tool_name: tool, tool_input: { file_path: filePath } }),
+  ],
+  [
+    "Cursor",
+    (root: string, tool: string, filePath: string) =>
+      cursorTool(root, { tool_name: tool, tool_input: { file_path: filePath } }),
+  ],
+] as const) {
+  for (const tool of ["Write", "Edit", "MultiEdit"]) {
+    test(`AGH-43: a ${tool} under ${label} to the global hooks file of the fail-closed host is wiring-tamper`, async () => {
+      const root = tempRoot();
+      try {
+        const target = providerNamed("antigravity").wiringTargets()[0] ?? "";
+        const outcome = await runHandler(toolBeforeHandler, {
+          ...stdinOf(build(root, tool, target)),
+          hostEvent: null,
+        });
+        assert.equal(outcome.decision.kind, "deny");
+        assert.match(outcome.decision.kind === "deny" ? outcome.decision.reason : "", /rule=wiring-tamper/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test(`AGH-44: a ${tool} under ${label} to the project's .agents/hooks.json is wiring-tamper`, async () => {
+      const root = tempRoot();
+      try {
+        const target = join(root, ".agents", "hooks.json");
+        const outcome = await runHandler(toolBeforeHandler, {
+          ...stdinOf(build(root, tool, target)),
+          hostEvent: null,
+        });
+        assert.equal(outcome.decision.kind, "deny");
+        assert.match(outcome.decision.kind === "deny" ? outcome.decision.reason : "", /rule=wiring-tamper/);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+/**
  * EFH-04 — a new provider's wiring target is protected the moment it registers, with zero change to
  * run.ts or tool-before.ts. The fixture is pushed into the real registry and spliced back out, the same
  * pattern provider.contract.test.ts already uses.
