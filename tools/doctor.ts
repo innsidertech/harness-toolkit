@@ -18,6 +18,11 @@ import {
 } from "../src/platform/paths.ts";
 import { catalogueMeta, planeMeta } from "../src/platform/pricing.ts";
 import { type ColorName, createStyle, PLAIN, type Style, SYMBOLS } from "../src/platform/style.ts";
+import { ANTIGRAVITY_SURFACE_CLAIM } from "../src/providers/antigravity/antigravity.surfaces.ts";
+import {
+  antigravityRecoveryNotice,
+  antigravityWiringProblems,
+} from "../src/providers/antigravity/antigravity.wiring.ts";
 import { mergeClaudeSettings } from "../src/providers/claude/claude.wiring.ts";
 import {
   cursorWiringProblems,
@@ -355,11 +360,14 @@ export type ProviderWiringStatus = "wired" | "detected-but-unwired" | "not-insta
  * ([/decisions/ad-032.md](/decisions/ad-032.md)).
  */
 export function wiringProblems(wiring: ProviderWiring): WiringProblem[] {
-  if (wiring.strategy !== "replace") {
+  if (wiring.strategy === "merge") {
     return [];
   }
   const text = existsSync(wiring.target) ? readFileSync(wiring.target, "utf8") : null;
-  return cursorWiringProblems(text, { launcherPath: launcherPathOf(wiring) }, existsSync);
+  const runtime = { launcherPath: launcherPathOf(wiring) };
+  return wiring.strategy === "named-group"
+    ? antigravityWiringProblems(text, runtime, existsSync)
+    : cursorWiringProblems(text, runtime, existsSync);
 }
 
 /**
@@ -372,8 +380,11 @@ function launcherPathOf(wiring: ProviderWiring): string {
 }
 
 export function providerWiringStatus(wiring: ProviderWiring): ProviderWiringStatus {
-  if (!existsSync(dirname(wiring.target))) {
+  if (!existsSync(wiring.presencePath ?? dirname(wiring.target))) {
     return "not-installed";
+  }
+  if (wiring.strategy === "named-group") {
+    return wiringProblems(wiring).length === 0 ? "wired" : "detected-but-unwired";
   }
   if (wiring.strategy === "replace") {
     if (!isCursorWired(wiring.target)) {
@@ -387,26 +398,61 @@ export function providerWiringStatus(wiring: ProviderWiring): ProviderWiringStat
   return result.ok && !result.changed ? "wired" : "detected-but-unwired";
 }
 
+function wiringCheck(provider: ProviderPort, wiring: ProviderWiring, status: ProviderWiringStatus): Check {
+  if (status === "not-installed") {
+    return { level: "ok", name: `${provider.name} wiring`, detail: "not installed" };
+  }
+  if (status === "wired") {
+    return { level: "ok", name: `${provider.name} wiring`, detail: `wired (${wiring.target})` };
+  }
+  // why: names the event and the reason. "detected but not wired" told an operator that something was wrong and
+  // nothing else, which is one step above silence.
+  const problems = wiringProblems(wiring);
+  const why = problems.length > 0 ? ` — ${formatWiringProblems(problems)}` : "";
+  return {
+    level: "warn",
+    name: `${provider.name} wiring`,
+    detail: `detected but not wired${why} — run: tlc harness update (${wiring.target})`,
+  };
+}
+
+/**
+ * why `ok` and not `warn`: the risk these lines name is accepted by design, and a warning that never clears on a
+ * healthy install is the one operators learn to skip ([/decisions/ad-034.md](/decisions/ad-034.md)). The recovery
+ * lines print only when the group is in place, because only then is there something to recover from
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+function namedGroupChecks(
+  provider: ProviderPort,
+  wiring: ProviderWiring,
+  status: ProviderWiringStatus,
+): Check[] {
+  const checks: Check[] = [
+    { level: "ok", name: `${provider.name} surfaces`, detail: ANTIGRAVITY_SURFACE_CLAIM },
+  ];
+  if (status !== "wired") {
+    return checks;
+  }
+  const [risk, recovery, lastResort] = antigravityRecoveryNotice(wiring.target).map((line) =>
+    line.replace(/^hooks: /, ""),
+  );
+  checks.push(
+    { level: "ok", name: `${provider.name} risk`, detail: risk ?? "" },
+    { level: "ok", name: `${provider.name} recovery`, detail: recovery ?? "" },
+    { level: "ok", name: `${provider.name} last resort`, detail: lastResort ?? "" },
+  );
+  return checks;
+}
+
 export function checkProviders(registry: readonly ProviderPort[], home: string): Check[] {
   const launcherPath = join(home, "bin", "tlc-exec.mjs");
-  return registry.map((provider) => {
+  return registry.flatMap((provider) => {
     const wiring = provider.wiring({ launcherPath });
     const status = providerWiringStatus(wiring);
-    if (status === "not-installed") {
-      return { level: "ok", name: `${provider.name} wiring`, detail: "not installed" };
-    }
-    if (status === "wired") {
-      return { level: "ok", name: `${provider.name} wiring`, detail: `wired (${wiring.target})` };
-    }
-    // why: names the event and the reason. "detected but not wired" told an operator that something was wrong and
-    // nothing else, which is one step above silence.
-    const problems = wiringProblems(wiring);
-    const why = problems.length > 0 ? ` — ${formatWiringProblems(problems)}` : "";
-    return {
-      level: "warn",
-      name: `${provider.name} wiring`,
-      detail: `detected but not wired${why} — run: tlc harness update (${wiring.target})`,
-    };
+    const check = wiringCheck(provider, wiring, status);
+    return wiring.strategy === "named-group"
+      ? [check, ...namedGroupChecks(provider, wiring, status)]
+      : [check];
   });
 }
 

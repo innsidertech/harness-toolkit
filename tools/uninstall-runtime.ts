@@ -21,6 +21,8 @@ import {
 } from "../src/platform/paths.ts";
 import { type Row, render, type Screen } from "../src/platform/screen.ts";
 import { createStyle, PLAIN, type Style } from "../src/platform/style.ts";
+import { antigravityGlobalHooksPath } from "../src/providers/antigravity/antigravity.paths.ts";
+import { unwireAntigravityHooks } from "../src/providers/antigravity/antigravity.wiring.ts";
 import { removeClaudeWiring, unmergeClaudeSettings } from "../src/providers/claude/claude.wiring.ts";
 import { unwireCursorHooks } from "../src/providers/cursor/cursor.wiring.ts";
 import { OPERATOR_OWNED, RUNTIME_PAYLOAD } from "./install-runtime.ts";
@@ -46,6 +48,8 @@ export type UninstallTargets = {
   binLinks: string[];
   claudeSettings: string;
   cursorHooks: string;
+  /** Absent: no named-group file to clean, which is what a target list written before this host means. */
+  antigravityHooks?: string;
   skillLinks: string[];
 };
 
@@ -71,6 +75,7 @@ export function uninstallTargets(env: NodeJS.ProcessEnv = process.env): Uninstal
     binLinks: launcherNames().map((name) => join(binDir, name)),
     claudeSettings: join(claudeConfigDir(), "settings.json"),
     cursorHooks: join(cursorConfigDir(), "hooks.json"),
+    antigravityHooks: antigravityGlobalHooksPath(),
     skillLinks: [
       join(claudeConfigDir(), "skills", "harness-init"),
       join(cursorConfigDir(), "skills", "harness-init"),
@@ -257,6 +262,29 @@ function planCursor(items: PlanItem[], hooksPath: string): void {
   }
 }
 
+// invariant: the file is shared with the operator's own hooks, so only the harness's key leaves it; the file goes
+// only when that key was all it held ([/decisions/ad-156.md](/decisions/ad-156.md)).
+function planAntigravity(items: PlanItem[], hooksPath: string): void {
+  const text = existsSync(hooksPath) ? readFileSync(hooksPath, "utf8") : null;
+  const result = unwireAntigravityHooks(text);
+  switch (result.kind) {
+    case "absent":
+      return;
+    case "unparsed":
+      items.push({ action: "keep", target: hooksPath, detail: "left untouched — it does not parse as JSON" });
+      return;
+    case "empty":
+      items.push({ action: "remove", target: hooksPath, detail: "the tlc-harness group was its only key" });
+      return;
+    default:
+      items.push({
+        action: "unmerge",
+        target: hooksPath,
+        detail: "drop the tlc-harness group, keep every other key",
+      });
+  }
+}
+
 function planRuntime(items: PlanItem[], home: string, purge: boolean): boolean {
   const homeIsLink = isSymlink(home);
   if (homeIsLink) {
@@ -319,6 +347,9 @@ export function planUninstall(targets: UninstallTargets, options: { purge?: bool
 
   planClaude(items, targets.claudeSettings);
   planCursor(items, targets.cursorHooks);
+  if (targets.antigravityHooks !== undefined) {
+    planAntigravity(items, targets.antigravityHooks);
+  }
   for (const link of targets.skillLinks) {
     planLink(items, link, targets.home, "skill link", "location");
   }
@@ -340,19 +371,26 @@ export function pendingItems(plan: UninstallPlan): PlanItem[] {
 
 export type UninstallResult = { applied: PlanItem[]; failed: { item: PlanItem; reason: string }[] };
 
+function applyUnmerge(target: string, targets: UninstallTargets): void {
+  if (target === targets.claudeSettings) {
+    removeClaudeWiring(target);
+    return;
+  }
+  const text = readFileSync(target, "utf8");
+  const result = target === targets.antigravityHooks ? unwireAntigravityHooks(text) : unwireCursorHooks(text);
+  if (result.kind === "rewritten") {
+    writeFileSync(target, result.text, "utf8");
+  }
+}
+
 export function applyUninstall(plan: UninstallPlan, targets: UninstallTargets): UninstallResult {
   const applied: PlanItem[] = [];
   const failed: { item: PlanItem; reason: string }[] = [];
 
   for (const item of pendingItems(plan)) {
     try {
-      if (item.action === "unmerge" && item.target === targets.claudeSettings) {
-        removeClaudeWiring(item.target);
-      } else if (item.action === "unmerge") {
-        const result = unwireCursorHooks(readFileSync(item.target, "utf8"));
-        if (result.kind === "rewritten") {
-          writeFileSync(item.target, result.text, "utf8");
-        }
+      if (item.action === "unmerge") {
+        applyUnmerge(item.target, targets);
       } else if (item.action === "unlink") {
         // why: `unlinkSync` states the intent — remove the link, never what it points at. Measured: `rmSync`
         // with `recursive` happens to agree, unlinking a symlink rather than descending it. The guard that

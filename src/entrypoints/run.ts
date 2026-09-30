@@ -7,6 +7,8 @@ import { projectStateDir } from "../platform/paths.ts";
 import { readStdinText } from "../platform/process.ts";
 import {
   degrade,
+  type FailClosedPosture,
+  type HookFailureCause,
   type ProviderPort,
   providers as providerRegistry,
   resolveFromRegistry,
@@ -19,6 +21,8 @@ export type HandlerContext = {
   provider: ProviderPort;
   now: Date;
   protectedPaths: string[];
+  /** The path the floor judges instead of the event's own, set only when an adapter matched a protected target through a path alias. */
+  floorFilePath?: string;
 };
 
 export type Handler = (event: HarnessEvent, ctx: HandlerContext) => Decision | Promise<Decision>;
@@ -26,13 +30,32 @@ export type Handler = (event: HarnessEvent, ctx: HandlerContext) => Decision | P
 export type RunIo = {
   readStdin?: () => Promise<string>;
   now?: () => Date;
+  /** Overrides the argv token after the handler; default hostEventOf(process.argv). `null` = no token. */
+  hostEvent?: string | null;
+  writeStderr?: (line: string) => void;
 };
 
 export type RunOutcome = {
   event: HarnessEvent | null;
   decision: Decision;
   rendered: Rendered;
+  /** Set only when a fail-closed host's invocation ended in one of its failure responses. */
+  failure?: HookFailureCause;
 };
+
+/** The token a wiring puts after the handler: `node <launcher> <handler> <token>` reaches here as `argv[2]`. */
+export function hostEventOf(argv: readonly string[]): string | undefined {
+  return argv[2];
+}
+
+/**
+ * hazard: every provider's targets are protected in every session, not only the session's own host's. An agent
+ * under one host that can edit another host's wiring switches that host's floor off for the next session there
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+export function composeProtectedPaths(registry: readonly ProviderPort[], projectDir: string): string[] {
+  return registry.flatMap((p) => [...p.wiringTargets(), ...(p.projectWiringTargets?.(projectDir) ?? [])]);
+}
 
 // invariant: this caps the whole injected context. Lessons carry their own, smaller budget
 // (lessons.maxCharsSession) — reusing that here truncated the operator posture and handoff.
@@ -151,16 +174,40 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunOutcome> {
-  const readStdin = io.readStdin ?? readStdinText;
-  const now = io.now ? io.now() : new Date();
-  const abstainRendered: Rendered = { stdout: null, exitCode: 0 };
+type FailClosedOwner = ProviderPort & { readonly failClosed: FailClosedPosture };
 
-  const text = await readStdin();
+type Resolution =
+  | { kind: "resolved"; provider: ProviderPort; event: HarnessEvent }
+  | { kind: "done"; outcome: RunOutcome };
+
+/**
+ * invariant: chosen from the argv token before stdin is read. A host that treats silence as consent needs a
+ * refusal even when stdin is empty or unparseable, and by then there is no payload to detect a provider from
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+function failClosedOwner(
+  registry: readonly ProviderPort[],
+  hostEvent: string | undefined,
+): FailClosedOwner | null {
+  if (hostEvent === undefined) {
+    return null;
+  }
+  const owner = registry.find(
+    (p) => p.failClosed !== undefined && hostEvent.startsWith(p.failClosed.hostEventPrefix),
+  );
+  return owner === undefined ? null : (owner as FailClosedOwner);
+}
+
+function resolveOpenInvocation(text: string, hostEvent: string | undefined): Resolution {
+  const abstainRendered: Rendered = { stdout: null, exitCode: 0 };
+  const abstained: Resolution = {
+    kind: "done",
+    outcome: { event: null, decision: { kind: "abstain" }, rendered: abstainRendered },
+  };
   const trimmed = text.trim();
   if (!trimmed) {
     recordAdapterEvent(process.cwd(), "adapter.unrecognized", { reason: "empty-stdin" });
-    return { event: null, decision: { kind: "abstain" }, rendered: abstainRendered };
+    return abstained;
   }
 
   let parsed: unknown;
@@ -168,28 +215,145 @@ export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunO
     parsed = JSON.parse(trimmed);
   } catch {
     recordAdapterEvent(process.cwd(), "adapter.unrecognized", { reason: "invalid-json" });
-    return { event: null, decision: { kind: "abstain" }, rendered: abstainRendered };
+    return abstained;
   }
 
   const resolved = resolveFromRegistry(parsed, providerRegistry);
   if (!resolved.provider) {
     recordAdapterEvent(process.cwd(), "adapter.unrecognized", { reason: "no-provider-match" });
-    return { event: null, decision: { kind: "abstain" }, rendered: abstainRendered };
+    return abstained;
   }
   if (resolved.ambiguous) {
     recordAdapterEvent(process.cwd(), "adapter.ambiguous", { matched: resolved.matchedNames });
   }
 
   const provider = resolved.provider;
-  const event = provider.toEvent(asRecord(parsed));
+  const event = provider.toEvent(asRecord(parsed), hostEvent);
   if (!event) {
     recordAdapterEvent(process.cwd(), "adapter.unrecognized", {
       reason: "unrecognized-event",
       provider: provider.name,
     });
-    return { event: null, decision: { kind: "abstain" }, rendered: abstainRendered };
+    return abstained;
   }
+  return { kind: "resolved", provider, event };
+}
 
+type FailureNote = { cause: HookFailureCause; detail: string; code: string; diagRoot: string | null };
+
+/**
+ * hazard: a fail-closed host may start the hook with its working directory inside the folder that holds its own
+ * wiring, so a diagnostic written under `process.cwd()` lands beside that file. Only the root the adapter names may
+ * receive one; without it, stderr carries the whole record.
+ */
+function failOwned(owner: FailClosedOwner, note: FailureNote, io: RunIo): Resolution {
+  const writeStderr = io.writeStderr ?? ((line: string) => process.stderr.write(`${line}\n`));
+  writeStderr(`tlc: hook failure (${note.cause}): ${note.detail}`);
+  if (note.diagRoot !== null) {
+    recordAdapterEvent(
+      note.diagRoot,
+      "adapter.unrecognized",
+      { reason: note.code, provider: owner.name },
+      owner.name,
+    );
+  }
+  return {
+    kind: "done",
+    outcome: {
+      event: null,
+      decision: { kind: "abstain" },
+      rendered: owner.failClosed.failureResponse(note.cause),
+      failure: note.cause,
+    },
+  };
+}
+
+/** why no registry lookup: the token already names the host, so a payload another provider detects is foreign. */
+function resolveOwnedInvocation(
+  owner: FailClosedOwner,
+  text: string,
+  hostEvent: string | undefined,
+  io: RunIo,
+): Resolution {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return failOwned(
+      owner,
+      { cause: "invalid-stdin", detail: "empty stdin", code: "empty-stdin", diagRoot: null },
+      io,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return failOwned(
+      owner,
+      { cause: "invalid-stdin", detail: "stdin is not JSON", code: "invalid-json", diagRoot: null },
+      io,
+    );
+  }
+  const diagRoot = owner.failClosed.diagnosticRoot(parsed);
+  if (!owner.detect(parsed)) {
+    return failOwned(
+      owner,
+      {
+        cause: "unrecognized-payload",
+        detail: "payload is not this host's",
+        code: "no-provider-match",
+        diagRoot,
+      },
+      io,
+    );
+  }
+  const event = owner.toEvent(asRecord(parsed), hostEvent);
+  if (!event) {
+    return failOwned(
+      owner,
+      { cause: "unrecognized-payload", detail: "event not translated", code: "unrecognized-event", diagRoot },
+      io,
+    );
+  }
+  return { kind: "resolved", provider: owner, event };
+}
+
+export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunOutcome> {
+  const readStdin = io.readStdin ?? readStdinText;
+  const now = io.now ? io.now() : new Date();
+  const hostEvent = io.hostEvent === undefined ? hostEventOf(process.argv) : (io.hostEvent ?? undefined);
+  const owner = failClosedOwner(providerRegistry, hostEvent);
+
+  const text = await readStdin();
+  const resolution =
+    owner === null
+      ? resolveOpenInvocation(text, hostEvent)
+      : resolveOwnedInvocation(owner, text, hostEvent, io);
+  if (resolution.kind === "done") {
+    return resolution.outcome;
+  }
+  return runResolved(handler, resolution.provider, resolution.event, owner, now);
+}
+
+/**
+ * invariant: the event itself stays raw. Only the floor's inputs change, and only when the adapter matched, so
+ * presence, claims, the refusal record and the render never see an adapter's resolved path
+ * ([/decisions/ad-156.md](/decisions/ad-156.md)).
+ */
+function handlerContext(event: HarnessEvent, base: HandlerContext): HandlerContext {
+  const alias = base.provider.canonicalWiringMatch?.(event, base.protectedPaths) ?? null;
+  if (alias === null) {
+    return base;
+  }
+  return { ...base, protectedPaths: alias.protectedPaths, floorFilePath: alias.filePath };
+}
+
+async function runResolved(
+  handler: Handler,
+  provider: ProviderPort,
+  event: HarnessEvent,
+  owner: FailClosedOwner | null,
+  now: Date,
+): Promise<RunOutcome> {
   const capabilities = provider.capabilities();
   recordHookEnter(event);
 
@@ -219,8 +383,8 @@ export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunO
       ...(claimsFile(event) ? { file: event.filePath } : {}),
       now,
     });
-    const protectedPaths = providerRegistry.flatMap((p) => p.wiringTargets());
-    const context: HandlerContext = { policy, capabilities, provider, now, protectedPaths };
+    const protectedPaths = composeProtectedPaths(providerRegistry, event.projectDir);
+    const context = handlerContext(event, { policy, capabilities, provider, now, protectedPaths });
     const decision = await handler(event, context);
     const degraded = degrade(decision, event, capabilities, {
       contextBudgetChars: CONTEXT_BUDGET_CHARS,
@@ -235,14 +399,24 @@ export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunO
       message: errorMessage(error),
     });
     const abstain: Decision = { kind: "abstain" };
+    if (owner !== null) {
+      return {
+        event,
+        decision: abstain,
+        rendered: owner.failClosed.failureResponse("handler-error"),
+        failure: "handler-error",
+      };
+    }
     return { event, decision: abstain, rendered: provider.render(abstain, event) };
   }
 }
 
 export async function main(handler: Handler): Promise<void> {
   const outcome = await runHandler(handler);
-  if (outcome.rendered.stdout !== null) {
-    const text = outcome.rendered.stdout;
+  // invariant: an empty render means zero bytes. A lone newline is not silence to a host that reads silence as
+  // success ([/decisions/ad-156.md](/decisions/ad-156.md)).
+  const text = outcome.rendered.stdout;
+  if (text !== null && text !== "") {
     process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
   }
   process.exit(outcome.rendered.exitCode);

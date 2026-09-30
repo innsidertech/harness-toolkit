@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { afterEach, describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { coreFacade } from "../../src/core/index.ts";
 import { DEFAULTS } from "../../src/core/policy/policy.defaults.ts";
 import {
+  antigravityInitLine,
   applyPlan,
   buildPlan,
   claudeShimEntries,
   configLine,
   cursorShimEntries,
+  detectAntigravity,
   detectProviders,
   GITIGNORE_STATE,
   gitignoreEntries,
@@ -304,6 +308,40 @@ describe("detectProviders", () => {
       cursor: false,
       claude: true,
     });
+  });
+});
+
+describe("antigravity at init", () => {
+  test("detection is the CLI directory", () => {
+    const home = newRoot();
+    const cli = join(home, ".gemini", "antigravity-cli");
+    assert.equal(detectAntigravity(cli), false);
+    mkdirSync(cli, { recursive: true });
+    assert.equal(detectAntigravity(cli), true);
+  });
+
+  test("the line names the host, what is not written and who writes the global group", () => {
+    const line = antigravityInitLine(true);
+    assert.match(line, /antigravity detected/);
+    assert.match(line, /\.agents\/hooks\.json not written/);
+    assert.match(line, /tlc harness install/);
+    assert.match(antigravityInitLine(false), /antigravity not installed/);
+  });
+
+  test("AGH-68: init with the host present lists it and never writes the workspace hooks file", () => {
+    const home = newRoot();
+    const project = newRoot();
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+    const script = join(dirname(fileURLToPath(import.meta.url)), "..", "init-project.ts");
+    const result = spawnSync(process.execPath, [script, "--minimal"], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home, USERPROFILE: home, TLC_PROJECT_DIR: project },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.stdout.includes(antigravityInitLine(true)), result.stdout);
+    assert.equal(existsSync(join(project, ".agents", "hooks.json")), false);
+    assert.equal(existsSync(join(project, ".agents")), false);
+    assert.equal(existsSync(join(home, ".gemini", "config", "hooks.json")), false);
   });
 });
 

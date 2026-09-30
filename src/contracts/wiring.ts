@@ -15,6 +15,8 @@ export type WiringEntry = {
 
 export type ProviderWiring = {
   target: string;
-  strategy: "replace" | "merge";
+  strategy: "replace" | "merge" | "named-group";
   entries: WiringEntry[];
+  /** Path whose existence means the host is installed. Absent: the directory holding `target`. */
+  presencePath?: string;
 };

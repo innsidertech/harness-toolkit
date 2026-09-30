@@ -31,9 +31,15 @@ export type ClaudeApplyResult =
   | { status: "unchanged"; target: string }
   | { status: "failed"; target: string; reason: string };
 
-export type ApplyResult = CursorApplyResult | ClaudeApplyResult;
+export type AntigravityApplyResult =
+  | { status: "merged" | "unchanged"; target: string }
+  | { status: "failed" | "refused"; target: string; reason: string };
+
+export type ApplyResult = CursorApplyResult | ClaudeApplyResult | AntigravityApplyResult;
 
 export function applyProviderWiring(wiring: ProviderWiring, options?: ApplyOptions): ApplyResult;
+
+export function providerPresencePath(wiring: ProviderWiring): string;
 
 export function isProviderHomePresent(wiring: ProviderWiring): boolean;
 

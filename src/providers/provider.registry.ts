@@ -1,3 +1,4 @@
+import { antigravityProvider } from "./antigravity/index.ts";
 import { claudeProvider } from "./claude/index.ts";
 import { cursorProvider } from "./cursor/index.ts";
 import type { ProviderPort } from "./provider.port.ts";
@@ -9,7 +10,7 @@ export type ResolveResult = {
 };
 
 // invariant: detection order is registry order — deterministic, never re-sorted.
-export const providers: ProviderPort[] = [cursorProvider, claudeProvider];
+export const providers: ProviderPort[] = [cursorProvider, claudeProvider, antigravityProvider];
 
 export function resolveFromRegistry(raw: unknown, registry: readonly ProviderPort[]): ResolveResult {
   const matched = registry.filter((provider) => provider.detect(raw));

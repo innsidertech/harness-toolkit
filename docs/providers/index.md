@@ -1,7 +1,7 @@
 ---
 type: Aggregate
 title: "Providers index"
-description: "Index of the provider adapters — Cursor and Claude Code — and the port they both implement."
+description: "Index of the provider adapters — Cursor, Claude Code and Antigravity — and the port they all implement."
 tags: [providers, index, architecture]
 timestamp: "2026-07-29"
 ---
@@ -18,9 +18,15 @@ type ProviderPort = {
   detect(raw: unknown): boolean;
   capabilities(): ProviderCapabilities;
   policyDefaults(): ProviderPolicyDefaults;
-  toEvent(raw: Record<string, unknown>): HarnessEvent | null;
+  toEvent(raw: Record<string, unknown>, hostEvent?: string): HarnessEvent | null;
   render(decision: Decision, event: HarnessEvent): Rendered;
   wiring(runtime: RuntimePaths): ProviderWiring;
+  projectWiringTargets?(projectDir: string): string[];
+  readonly failClosed?: FailClosedPosture;
+  canonicalWiringMatch?(
+    event: HarnessEvent,
+    protectedPaths: readonly string[],
+  ): { filePath: string; protectedPaths: string[] } | null;
 };
 ```
 
@@ -32,6 +38,15 @@ type ProviderPort = {
 - `toEvent` — parses a raw hook payload into the shared `HarnessEvent` shape.
 - `render` — turns a core `Decision` back into this provider's wire format.
 - `wiring` — describes which hooks this provider needs registered, and where.
+- `hostEvent` — the argv token after the handler, passed through unread; only a provider whose wiring writes
+  one interprets it.
+- `projectWiringTargets` — wiring files inside the event's own project that the floor protects, beside the
+  machine-wide ones.
+- `failClosed` — for a host that reads silence as permission: the token prefix that marks its invocations and
+  the refusal each harness failure renders ([/decisions/ad-156.md](/decisions/ad-156.md)).
+- `canonicalWiringMatch` — for a host whose file paths can alias a protected target: when a write reaches one
+  only through an alias, the path and targets the floor judges instead of the raw ones; `null` otherwise
+  ([/decisions/ad-156.md](/decisions/ad-156.md)).
 
 ## Registered providers
 
@@ -42,6 +57,7 @@ matches are reported as ambiguous rather than silently resolved:
 | --- | --- | --- |
 | Cursor | camelCase `hook_event_name` + `workspace_roots` array | [/providers/cursor.md](/providers/cursor.md) |
 | Claude Code | PascalCase `hook_event_name` + `cwd` or `transcript_path` | [/providers/claude-code.md](/providers/claude-code.md) |
+| Antigravity | `conversationId` + `workspacePaths` array + `transcriptPath`, under an `antigravity:` argv token | [/providers/antigravity.md](/providers/antigravity.md) |
 
 ## Event kinds
 

@@ -56,6 +56,7 @@ import {
 } from "../../bin/tlc-cli.ts";
 import { coreFacade } from "../../src/core/index.ts";
 import { flagsDir, loopsDir, projectConfigPath, projectStateDir } from "../../src/platform/paths.ts";
+import { ANTIGRAVITY_SURFACE_CLAIM } from "../../src/providers/antigravity/antigravity.surfaces.ts";
 import { COMPLEXITY_CEILING } from "../dev/check-complexity.ts";
 
 function fixtureRoot(): string {
@@ -318,6 +319,7 @@ describe("statusText / help text", () => {
       modeOrigin: "config",
       grind: false,
       gatesPaused: false,
+      surfaces: { antigravity: ANTIGRAVITY_SURFACE_CLAIM },
     });
   });
 
@@ -331,7 +333,19 @@ describe("statusText / help text", () => {
       modeOrigin: "config",
       grind: true,
       gatesPaused: true,
+      surfaces: { antigravity: ANTIGRAVITY_SURFACE_CLAIM },
     });
+  });
+
+  test("AGH-67: status text and JSON both carry the antigravity surface claim", () => {
+    const root = newRoot();
+    const claim = statusJson(root).surfaces.antigravity ?? "";
+    const text = statusText(root);
+    for (const token of ["CLI", "floor enforced", "IDE 2.0.2", "app 2.18.1", "unverified"]) {
+      assert.ok(claim.includes(token), `json: ${token}`);
+      assert.ok(text.includes(token), `text: ${token}`);
+    }
+    assert.match(text, /antigravity/);
   });
 
   test("statusJson reports the posture the mode file holds, and reports grind separately", () => {

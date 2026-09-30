@@ -334,7 +334,7 @@ export const toolBeforeHandler: Handler = async (
   const floor = coreFacade.floor.evaluateFloor({
     projectDir: event.projectDir,
     toolName: event.toolName,
-    filePath: filePathOf(event),
+    filePath: ctx.floorFilePath ?? filePathOf(event),
     command: event.command,
     isReadEvent: event.event === "read.before",
     protectedPaths: ctx.protectedPaths,

@@ -2,6 +2,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  antigravityRecoveryNotice,
+  applyAntigravityWiring,
+} from "../src/providers/antigravity/antigravity.wiring.ts";
 import { applyClaudeWiring } from "../src/providers/claude/claude.wiring.ts";
 import { providers } from "../src/providers/index.ts";
 
@@ -62,6 +66,9 @@ export function applyProviderWiring(wiring, { force = false } = {}) {
   if (wiring.strategy === "replace") {
     return applyCursorWiring(wiring, { force });
   }
+  if (wiring.strategy === "named-group") {
+    return applyAntigravityWiring(wiring);
+  }
   const result = applyClaudeWiring(wiring.target, wiring.entries);
   if (!result.ok) {
     return { status: "failed", target: wiring.target, reason: result.error };
@@ -69,8 +76,14 @@ export function applyProviderWiring(wiring, { force = false } = {}) {
   return { status: result.changed ? "merged" : "unchanged", target: wiring.target };
 }
 
+// why `presencePath`: a host whose wiring file lives in a shared config directory is not installed merely because
+// that directory exists — another product of the same vendor creates it too.
+export function providerPresencePath(wiring) {
+  return wiring.presencePath ?? dirname(wiring.target);
+}
+
 export function isProviderHomePresent(wiring) {
-  return existsSync(dirname(wiring.target));
+  return existsSync(providerPresencePath(wiring));
 }
 
 function report(result) {
@@ -107,11 +120,17 @@ export function main() {
   for (const provider of providers) {
     const wiring = provider.wiring({ launcherPath });
     if (!isProviderHomePresent(wiring)) {
-      console.log(`hooks: ${provider.name} not installed — skipping (${dirname(wiring.target)} not found)`);
+      console.log(`hooks: ${provider.name} not installed — skipping (${providerPresencePath(wiring)} not found)`);
       continue;
     }
     if (!report(applyProviderWiring(wiring, { force }))) {
       anyFailed = true;
+      continue;
+    }
+    if (wiring.strategy === "named-group") {
+      for (const line of antigravityRecoveryNotice(wiring.target)) {
+        console.log(line);
+      }
     }
   }
 

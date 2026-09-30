@@ -117,7 +117,10 @@ export function assertSatisfiesContract(provider: ProviderPort): void {
 
   const wiring = provider.wiring({ launcherPath: "/tmp/tlc-exec.mjs" });
   assert.ok(wiring.target.length > 0, "wiring target is non-empty");
-  assert.ok(wiring.strategy === "replace" || wiring.strategy === "merge", "strategy is replace or merge");
+  assert.ok(
+    wiring.strategy === "replace" || wiring.strategy === "merge" || wiring.strategy === "named-group",
+    "strategy is replace, merge or named-group",
+  );
 
   const wiringTargets = provider.wiringTargets();
   assert.ok(Array.isArray(wiringTargets), `${provider.name}.wiringTargets() is an array`);
@@ -192,6 +195,13 @@ test("registry starts with only genuinely registered providers, each satisfying 
   for (const provider of providers) {
     assertSatisfiesContract(provider);
   }
+});
+
+test("AGH-55: the registry carries the three hosts in detection order, so every contract and conformance test above and beside this one covers antigravity", () => {
+  assert.deepEqual(
+    providers.map((provider) => provider.name),
+    ["cursor", "claude", "antigravity"],
+  );
 });
 
 test("resolveFromRegistry: zero matches returns null without throwing", () => {
