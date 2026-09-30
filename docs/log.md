@@ -16,6 +16,7 @@ newest first. For what landed in which npm release, see `CHANGELOG.md` at the re
 ## 2026-09-30
 
 - **AD-156** — Antigravity is a provider whose every harness failure is a refusal ([/decisions/ad-156.md](/decisions/ad-156.md))
+- **AD-157** — The floor reads Windows shell verbs for every host; Antigravity closes its wiring routes through an optional port ([/decisions/ad-157.md](/decisions/ad-157.md))
 
 ## 2026-09-19
 

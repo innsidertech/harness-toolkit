@@ -9,6 +9,7 @@ doctor reports against your own configuration.
 ## Unreleased
 
 - **AD-156** — Antigravity is a provider whose every harness failure is a refusal
+- **AD-157** — The floor reads Windows shell verbs for every host; Antigravity closes its wiring routes through an optional port
 
 ## v0.16.2
 

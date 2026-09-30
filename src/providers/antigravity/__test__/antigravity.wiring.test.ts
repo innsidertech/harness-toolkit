@@ -234,6 +234,7 @@ test("AGH-85: the recovery notice is three lines in order, and never offers the 
   const lines = antigravityRecoveryNotice(target);
   assert.equal(lines.length, 3);
   assert.ok(lines[0]?.includes("unverified surfaces may deny every tool"));
+  assert.ok(lines[0]?.includes("a CLI newer than 1.2.14"));
   assert.ok(lines[1]?.includes(`recovery: remove only the "tlc-harness" key from ${target}`));
   assert.ok(
     lines[2]?.includes(

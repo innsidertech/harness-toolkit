@@ -288,7 +288,7 @@ export function antigravityWiringProblems(
  */
 export function antigravityRecoveryNotice(target: string): string[] {
   return [
-    "hooks: warning — unverified surfaces may deny every tool: Antigravity IDE 2.0.2, app 2.18.1, or a CLI newer than 1.2.13 firing this group with another payload is refused by the harness",
+    "hooks: warning — unverified surfaces may deny every tool: Antigravity IDE 2.0.2, app 2.18.1, or a CLI newer than 1.2.14 firing this group with another payload is refused by the harness",
     `hooks: recovery: remove only the "${ANTIGRAVITY_GROUP_NAME}" key from ${target} (outside agy), or delete the file when it is the only key`,
     "hooks: last resort: tlc harness uninstall --yes also removes the Claude and Cursor harness hooks, the harness-init skill links, tlc from PATH and ~/.tlc/harness",
   ];
