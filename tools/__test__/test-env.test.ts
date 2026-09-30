@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildTestSteps, TEST_ENV_IMPORT } from "../../bin/tlc-cli.ts";
@@ -12,6 +12,10 @@ import {
   cursorConfigDir,
   launcherBinDir,
 } from "../../src/platform/paths.ts";
+import {
+  antigravityCliDir,
+  antigravityGlobalHooksPath,
+} from "../../src/providers/antigravity/antigravity.paths.ts";
 import { PROJECT_SCOPED_ENV, PUBLISHED_ENV, REDIRECTED_ENV, RUNTIME_SCOPED_ENV } from "../test-env.names.mjs";
 
 // invariant: the names come from test-env.names.mjs, which has no side effect. Importing test-env.mjs here
@@ -203,6 +207,8 @@ test("every path derived from the home lands inside it", () => {
     ["runtime home", conventionalRuntimeHome()],
     ["claude config", claudeConfigDir()],
     ["cursor config", cursorConfigDir()],
+    ["antigravity global hooks", antigravityGlobalHooksPath()],
+    ["antigravity cli dir", antigravityCliDir()],
   ] as const) {
     assert.ok(path.startsWith(home), `${label} escaped the fake home: ${path}`);
   }
@@ -246,12 +252,46 @@ test("the setup module redirects a home that is already set", () => {
  * hazard: this read `TLC_TEST_REAL_HOME`, which nothing set — so it returned on its first line every single run. The
  * one test written as the negative of the whole claim never ran ([/decisions/ad-102.md](/decisions/ad-102.md)).
  */
+/**
+ * hazard: this asserted that no derived path starts with the real home. The default Windows `%TEMP%` lives under the
+ * real home, so the fake home sat under it too and the assertion failed on every Windows machine with a default
+ * profile, while nothing it protects was touched. The title names what is protected — the real provider
+ * directories — so the assertion is narrowed to exactly those.
+ */
+function realDirectoryViolations(pairs: readonly (readonly [string, string])[]): string[] {
+  return pairs
+    .filter(([path, realDir]) => {
+      const rel = relative(realDir, path);
+      return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+    })
+    .map(([path, realDir]) => `${path} is inside the real directory ${realDir}`);
+}
+
+function derivedAgainstReal(realHome: string): [string, string][] {
+  return [
+    [claudeConfigDir(), join(realHome, ".claude")],
+    [cursorConfigDir(), join(realHome, ".cursor")],
+    [conventionalRuntimeHome(), join(realHome, ".tlc", "harness")],
+    [antigravityCliDir(), join(realHome, ".gemini")],
+    [antigravityGlobalHooksPath(), join(realHome, ".gemini")],
+  ];
+}
+
 test("the real provider directories are not what a test would write to", () => {
   const realHome = process.env.TLC_TEST_REAL_HOME;
   assert.ok(realHome, "the setup must publish the home it replaced, or this assertion is vacuous");
-  for (const path of [claudeConfigDir(), cursorConfigDir(), conventionalRuntimeHome()]) {
-    assert.ok(!path.startsWith(realHome), `${path} is inside the real home ${realHome}`);
-  }
+  assert.deepEqual(realDirectoryViolations(derivedAgainstReal(realHome)), []);
+});
+
+test("a derived path forced into a real provider directory is reported", () => {
+  const realHome = process.env.TLC_TEST_REAL_HOME;
+  assert.ok(realHome);
+  const forced = derivedAgainstReal(realHome).map(([path, realDir], index): [string, string] =>
+    index === 3 ? [join(realDir, "antigravity-cli"), realDir] : [path, realDir],
+  );
+  assert.deepEqual(realDirectoryViolations(forced), [
+    `${join(realHome, ".gemini", "antigravity-cli")} is inside the real directory ${join(realHome, ".gemini")}`,
+  ]);
 });
 
 /**
