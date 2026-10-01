@@ -24,8 +24,12 @@ Each fixture is the capture's `stdin` after exactly two rules, and no other fiel
    `no-personal-paths` gate refuses a home path with a real account name in any tracked file, and JSON cannot carry
    that gate's per-line exception.
 
+The 48 captures are copied in `__test__/captures/`, from `.specs/features/tlc-harness-antigravity/captures/` in the
+agentic-squad repository. Both rules were applied to the whole file, to every string value at any depth, not only to
+`stdin`; the account segment is read from each capture's own `stdin.workspacePaths[0]`.
+
 The test for AGH-51 (`antigravity.fixtures.test.ts`) compares each fixture with its capture by applying both rules
-to the capture. It skips when the captures directory is not beside this checkout.
+to the capture. The captures sit beside the tests, so the tests that read them no longer skip.
 
 ## Fixture → capture
 

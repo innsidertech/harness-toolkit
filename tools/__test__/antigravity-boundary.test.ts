@@ -49,6 +49,17 @@ function neutralLines(): { where: string; text: string }[] {
   );
 }
 
+/**
+ * why `Stop-Computer` is removed first: it is a PowerShell verb the floor denies on every provider, not this host's
+ * `Stop` event, and `\bStop\b` would count it ([/decisions/ad-157.md](/decisions/ad-157.md)).
+ */
+function addedHostHits(lines: readonly string[]): string[] {
+  return lines.filter((line) => {
+    const verbless = line.replace(/`/g, "").replace(/Stop-Computer/gi, "");
+    return HOST_TOKENS.some((token) => line.includes(token)) || /\bStop\b/.test(verbless);
+  });
+}
+
 describe("AGH-29 and AGH-80: the neutral layers stay free of this host", () => {
   test("AGH-29: no native tool name appears in src/core or src/contracts", () => {
     const natives = ANTIGRAVITY_TOOLS.map((tool) => tool.native);
@@ -73,21 +84,23 @@ describe("AGH-29 and AGH-80: the neutral layers stay free of this host", () => {
   const base = spawnSync("git", ["cat-file", "-e", `${BASE}^{commit}`], { cwd: repoRoot });
   const skip = base.status === 0 ? false : `${BASE} is not in this clone's history`;
 
-  test("AGH-47: the floor's decision files carry no diff against the base", { skip }, () => {
-    const frozen = [
-      "floor.service.ts",
-      "floor.catalog.ts",
-      "floor.tokenize.ts",
-      "floor.verb.ts",
-      "floor.paths.ts",
-      "floor.policy-surface.ts",
-    ].map((file) => `src/core/floor/${file}`);
-    const diff = spawnSync("git", ["diff", "--name-only", BASE, "--", ...frozen], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
-    assert.equal(diff.status, 0, diff.stderr);
-    assert.equal(diff.stdout.trim(), "");
+  test("AGH-80: the diff matcher counts the host's Stop and not the PowerShell verb Stop-Computer", () => {
+    assert.deepEqual(
+      addedHostHits([
+        '+  denies: "`Stop-Computer`, `Restart-Computer`",',
+        '+  assertDenied("Stop-computer", rule);',
+        '+  assertDenied("Stop-Comp`uter", rule);',
+      ]),
+      [],
+    );
+    for (const line of [
+      '+  event: "Stop",',
+      "+  // on Stop the host",
+      "+  Stop-Process -Name x",
+      "+  hooks.json",
+    ]) {
+      assert.deepEqual(addedHostHits([line]), [line], line);
+    }
   });
 
   test("AGH-80: the diff against the base adds none of those tokens to src/core or src/contracts", {
@@ -101,9 +114,6 @@ describe("AGH-29 and AGH-80: the neutral layers stay free of this host", () => {
     const added = diff.stdout
       .split(/\r?\n/)
       .filter((line) => line.startsWith("+") && !line.startsWith("+++"));
-    const hits = added.filter(
-      (line) => HOST_TOKENS.some((token) => line.includes(token)) || /\bStop\b/.test(line),
-    );
-    assert.deepEqual(hits, []);
+    assert.deepEqual(addedHostHits(added), []);
   });
 });

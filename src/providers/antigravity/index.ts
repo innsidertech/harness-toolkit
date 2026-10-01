@@ -2,6 +2,7 @@ import type { ProviderPort } from "../provider.port.ts";
 import { antigravityCapabilities } from "./antigravity.capabilities.ts";
 import { detectAntigravity } from "./antigravity.detect.ts";
 import { antigravityFailClosed } from "./antigravity.failure.ts";
+import { antigravityFloorHostFacts } from "./antigravity.floor-facts.ts";
 import { antigravityToEvent } from "./antigravity.inbound.ts";
 import { antigravityRender } from "./antigravity.outbound.ts";
 import { antigravityCanonicalWiringMatch } from "./antigravity.paths.ts";
@@ -24,6 +25,7 @@ export const antigravityProvider: ProviderPort = {
   projectWiringTargets: antigravityProjectWiringTargets,
   failClosed: antigravityFailClosed,
   canonicalWiringMatch: antigravityCanonicalWiringMatch,
+  floorHostFacts: antigravityFloorHostFacts,
   // why: the host has no view to write lessons into that its model would read.
   lessonsView: (_root: string): string | null => null,
 };

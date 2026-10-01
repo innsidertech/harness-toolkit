@@ -1,0 +1,30 @@
+{
+  "mode": "allow",
+  "eventArg": "PreToolUse",
+  "why": "end",
+  "cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\.agents",
+  "argvTail": [
+    "PreToolUse"
+  ],
+  "stdin": {
+    "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+    "conversationId": "<id>",
+    "modelName": "gemini-3.8-flash-high",
+    "stepIdx": 3,
+    "toolCall": {
+      "args": {
+        "CommandLine": "Write-Output \"hello-capture\"",
+        "Cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture",
+        "IsDaemon": false,
+        "WaitMsBeforeAsync": 5000,
+        "toolAction": "Printing hello-capture",
+        "toolSummary": "Print hello-capture"
+      },
+      "name": "run_command"
+    },
+    "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+    ]
+  }
+}

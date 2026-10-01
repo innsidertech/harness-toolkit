@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { ANTIGRAVITY_EVENT_PREFIX } from "../antigravity.events.ts";
 import {
@@ -10,6 +11,7 @@ import {
   antigravityWiring,
   antigravityWiringProblems,
   antigravityWiringTargets,
+  applyAntigravityWiring,
   mergeAntigravityGroup,
   renderAntigravityGroup,
   unwireAntigravityHooks,
@@ -124,6 +126,45 @@ test("AGH-36: invalid JSON or a non-object root is refused", () => {
   }
 });
 
+test("AGF-26: a launcher with a space is refused with the measured reason and the file is left as it was", () => {
+  const spaced = "C:\\Program Files\\x\\tlc-exec.mjs";
+  const root = mkdtempSync(join(tmpdir(), "agy-space-"));
+  try {
+    const absent = join(root, "absent", "hooks.json");
+    const present = join(root, "hooks.json");
+    const before = `${JSON.stringify({ "outro-hook": { Stop: [] } }, null, 2)}\n`;
+    writeFileSync(present, before);
+    const reason = `launcher path contains a space — not wiring antigravity: ${spaced}. Quoting does not help on agy 1.2.14: the host splits the hook command on spaces, a quote stays a literal character in the argument, and the hook runs with its working directory set to the hooks.json directory.`;
+    for (const target of [absent, present]) {
+      const wiring = { ...antigravityWiring({ launcherPath: spaced }), target };
+      assert.deepEqual(applyAntigravityWiring(wiring), { status: "refused", target, reason });
+    }
+    assert.equal(existsSync(absent), false);
+    assert.equal(existsSync(dirname(absent)), false);
+    assert.equal(readFileSync(present, "utf8"), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("AGF-28: the rendered command stays unquoted, one space between the parts", () => {
+  const group = renderAntigravityGroup(antigravityWiring(RUNTIME).entries) as Record<
+    string,
+    [{ command?: string; hooks?: [{ command: string }] }]
+  >;
+  const commands = [
+    group.PreToolUse?.[0].hooks?.[0].command,
+    group.PostToolUse?.[0].hooks?.[0].command,
+    group.Stop?.[0].command,
+  ];
+  assert.deepEqual(commands, [
+    `node ${LAUNCHER} tool-before antigravity:PreToolUse`,
+    `node ${LAUNCHER} tool-after antigravity:PostToolUse`,
+    `node ${LAUNCHER} stop antigravity:Stop`,
+  ]);
+  assert.ok(commands.every((command) => !command?.includes('"')));
+});
+
 test("AGH-40: unwire removes only the group, and reports an only-key file as empty", () => {
   assert.deepEqual(unwireAntigravityHooks(null), { kind: "absent" });
   assert.deepEqual(unwireAntigravityHooks(JSON.stringify({ other: {} })), { kind: "absent" });
@@ -193,6 +234,7 @@ test("AGH-85: the recovery notice is three lines in order, and never offers the 
   const lines = antigravityRecoveryNotice(target);
   assert.equal(lines.length, 3);
   assert.ok(lines[0]?.includes("unverified surfaces may deny every tool"));
+  assert.ok(lines[0]?.includes("a CLI newer than 1.2.14"));
   assert.ok(lines[1]?.includes(`recovery: remove only the "tlc-harness" key from ${target}`));
   assert.ok(
     lines[2]?.includes(

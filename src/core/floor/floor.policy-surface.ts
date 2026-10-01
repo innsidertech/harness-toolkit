@@ -1,7 +1,7 @@
 import { relative, resolve } from "node:path";
 import { projectConfigPath, projectStateDir } from "../../platform/paths.ts";
 import { normalizeSeparators } from "../../platform/sanitize.ts";
-import { isInside, isPolicySurface, resolveTarget } from "./floor.paths.ts";
+import { isInside, isPolicySurface, resolveTarget, type WiringMatch } from "./floor.paths.ts";
 import {
   type HeredocChunk,
   heredocChunks,
@@ -141,27 +141,28 @@ function namesSurface(projectDir: string, segment: ShellSegment): boolean {
 // direction is what catches `rm -rf .tlc/harness/state`, which removes the flags without ever naming one.
 // hazard: the project root also contains the surface. Counting it would deny `find .` and `grep -r x .`,
 // so the root is excluded and destruction of the whole project stays the concern of the existing rules.
-function overlapsSurface(
-  projectDir: string,
-  resolved: string,
-  extraSurfacePaths: readonly string[],
-): boolean {
+function overlapsSurface(projectDir: string, resolved: string, surface: ExtraSurface): boolean {
   if (resolved === resolve(projectDir)) {
     return false;
   }
-  if (isPolicySurface(projectDir, resolved, extraSurfacePaths)) {
+  if (isPolicySurface(projectDir, resolved, surface.paths, surface.match)) {
     return true;
   }
   return [projectConfigPath(projectDir), projectStateDir(projectDir)].some(
-    (surface) => isInside(surface, resolved) || isInside(resolved, surface),
+    (own) => isInside(own, resolved) || isInside(resolved, own),
   );
 }
 
-function referencesSurface(
-  projectDir: string,
-  word: ShellWord,
-  extraSurfacePaths: readonly string[],
-): boolean {
+/**
+ * The wiring targets a host adds to the surface, the base its relative words resolve against, and how the host
+ * compares paths with those targets. The harness's own paths ignore `match`.
+ */
+type ExtraSurface = { paths: readonly string[]; base: string; match?: WiringMatch | undefined };
+
+type PolicySurfaceOptions = { base?: string | undefined; match?: WiringMatch | undefined };
+
+function referencesSurface(projectDir: string, word: ShellWord, surface: ExtraSurface): boolean {
+  const extraSurfacePaths = surface.paths;
   if (word.text === "") {
     return false;
   }
@@ -175,7 +176,7 @@ function referencesSurface(
     }
     return extraSurfacePaths.some((path) => normalized.includes(normalizeSeparators(path)));
   }
-  return overlapsSurface(projectDir, resolveTarget(projectDir, word.text), extraSurfacePaths);
+  return overlapsSurface(projectDir, resolveTarget(surface.base, word.text), surface);
 }
 
 // why: a redirect target is not an argument of the head verb, so argument scanning alone would allow
@@ -221,10 +222,10 @@ function harnessSubcommand(args: ShellWord[]): string | null {
 function checkSegment(
   projectDir: string,
   segment: ShellSegment,
-  extraSurfacePaths: readonly string[],
+  surface: ExtraSurface,
 ): PolicySurfaceVerdict {
   for (const target of redirectTargets(segment.words)) {
-    if (referencesSurface(projectDir, target, extraSurfacePaths)) {
+    if (referencesSurface(projectDir, target, surface)) {
       return deny(
         "a redirect in this command writes into the harness policy surface.",
         "redirect into the policy surface",
@@ -244,7 +245,7 @@ function checkSegment(
     }
   }
 
-  const references = segment.words.filter((word) => referencesSurface(projectDir, word, extraSurfacePaths));
+  const references = segment.words.filter((word) => referencesSurface(projectDir, word, surface));
   if (references.length === 0 && !namesSurface(projectDir, segment)) {
     return ALLOW;
   }
@@ -322,9 +323,15 @@ export function checkPolicySurface(
   command: string,
   segments: ShellSegment[],
   extraSurfacePaths: readonly string[] = [],
+  options: PolicySurfaceOptions = {},
 ): PolicySurfaceVerdict {
+  const surface: ExtraSurface = {
+    paths: extraSurfacePaths,
+    base: options.base ?? projectDir,
+    match: options.match,
+  };
   for (const segment of segments) {
-    const verdict = checkSegment(projectDir, segment, extraSurfacePaths);
+    const verdict = checkSegment(projectDir, segment, surface);
     if (verdict.kind === "deny") {
       return verdict;
     }

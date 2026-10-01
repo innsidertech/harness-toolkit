@@ -1,5 +1,11 @@
 import { join } from "node:path";
-import type { Decision, HarnessEvent, ProviderCapabilities, Rendered } from "../contracts/index.ts";
+import type {
+  Decision,
+  FloorHostFacts,
+  HarnessEvent,
+  ProviderCapabilities,
+  Rendered,
+} from "../contracts/index.ts";
 import { isWriteTool } from "../contracts/tool-names.ts";
 import { coreFacade, type Policy } from "../core/index.ts";
 import { appendRecord } from "../platform/fs-jsonl.ts";
@@ -23,6 +29,8 @@ export type HandlerContext = {
   protectedPaths: string[];
   /** The path the floor judges instead of the event's own, set only when an adapter matched a protected target through a path alias. */
   floorFilePath?: string;
+  /** What the provider knows about this event that the floor needs to judge wiring routes; absent for a provider without the port member. */
+  floorHostFacts?: FloorHostFacts;
 };
 
 export type Handler = (event: HarnessEvent, ctx: HandlerContext) => Decision | Promise<Decision>;
@@ -341,10 +349,13 @@ export async function runHandler(handler: Handler, io: RunIo = {}): Promise<RunO
  */
 function handlerContext(event: HarnessEvent, base: HandlerContext): HandlerContext {
   const alias = base.provider.canonicalWiringMatch?.(event, base.protectedPaths) ?? null;
+  // why the raw list: the facts derive ancestors from the composed targets, not from their alias-replaced forms.
+  const facts = base.provider.floorHostFacts?.(event, base.protectedPaths) ?? null;
+  const withFacts = facts === null ? base : { ...base, floorHostFacts: facts };
   if (alias === null) {
-    return base;
+    return withFacts;
   }
-  return { ...base, protectedPaths: alias.protectedPaths, floorFilePath: alias.filePath };
+  return { ...withFacts, protectedPaths: alias.protectedPaths, floorFilePath: alias.filePath };
 }
 
 async function runResolved(

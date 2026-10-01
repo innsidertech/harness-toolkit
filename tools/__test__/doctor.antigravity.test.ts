@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, test } from "node:test";
@@ -10,7 +10,8 @@ import {
   mergeAntigravityGroup,
 } from "../../src/providers/antigravity/antigravity.wiring.ts";
 import type { ProviderPort } from "../../src/providers/provider.port.ts";
-import { type Check, checkProviders, formatReport } from "../doctor.ts";
+import { type Check, checkProviders, checkSkillLinks, formatReport } from "../doctor.ts";
+import { withEnv } from "../test-env.scope.mjs";
 
 const roots: string[] = [];
 
@@ -162,5 +163,74 @@ describe("doctor and the antigravity group", () => {
         assert.ok(text.includes(token), `${token} (host present: ${hostPresent})`);
       }
     }
+  });
+});
+
+describe("doctor and the antigravity init skill link", () => {
+  const LINE = "init skill (antigravity-cli)";
+
+  /** A throwaway home holding only the Antigravity CLI directory, and a runtime with the skill. */
+  function skillMachine({ hostPresent = true } = {}) {
+    const root = mkdtempSync(join(tmpdir(), "doctor-agy-skill-"));
+    roots.push(root);
+    const home = join(root, "home");
+    const runtime = join(root, "runtime");
+    const cliDir = join(home, ".gemini", "antigravity-cli");
+    mkdirSync(join(runtime, "skills", "harness-init"), { recursive: true });
+    if (hostPresent) {
+      mkdirSync(join(cliDir, "skills"), { recursive: true });
+    }
+    return { root, home, runtime, link: join(cliDir, "skills", "harness-init") };
+  }
+
+  function skillRow(box: { home: string; runtime: string }): Check | undefined {
+    const checks = withEnv(
+      { HOME: box.home, USERPROFILE: box.home, CLAUDE_CONFIG_DIR: undefined, CURSOR_CONFIG_DIR: undefined },
+      () => checkSkillLinks(box.runtime),
+    );
+    return row(checks, LINE);
+  }
+
+  test("AGF-59: a healthy link is ok, with the linkHealthMessage text", () => {
+    const box = skillMachine();
+    symlinkSync(join(box.runtime, "skills", "harness-init"), box.link, "junction");
+    const line = skillRow(box);
+    assert.equal(line?.level, "ok");
+    assert.equal(line?.detail, `linked → ${realpathSync(join(box.runtime, "skills", "harness-init"))}`);
+  });
+
+  test("AGF-59: an absent link fails", () => {
+    const box = skillMachine();
+    const line = skillRow(box);
+    assert.equal(line?.level, "fail");
+    assert.equal(line?.detail, "not linked — the provider cannot see the init skill");
+  });
+
+  test("AGF-59: a dangling link fails", () => {
+    const box = skillMachine();
+    const gone = join(box.root, "gone");
+    mkdirSync(gone);
+    symlinkSync(gone, box.link, "junction");
+    rmSync(gone, { recursive: true });
+    const line = skillRow(box);
+    assert.equal(line?.level, "fail");
+    assert.match(line?.detail ?? "", /^points at .*, which does not exist — re-run `tlc harness install`$/);
+  });
+
+  test("AGF-59: a link outside the runtime fails", () => {
+    const box = skillMachine();
+    const elsewhere = join(box.root, "elsewhere");
+    mkdirSync(elsewhere);
+    symlinkSync(elsewhere, box.link, "junction");
+    const line = skillRow(box);
+    assert.equal(line?.level, "fail");
+    assert.equal(
+      line?.detail,
+      `points at ${realpathSync(elsewhere)}, outside the runtime — it will break when that path goes`,
+    );
+  });
+
+  test("AGF-59: without the CLI directory the line is not printed", () => {
+    assert.equal(skillRow(skillMachine({ hostPresent: false })), undefined);
   });
 });

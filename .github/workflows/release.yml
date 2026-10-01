@@ -69,7 +69,11 @@ jobs:
   # that a `docs` commit releases nothing spends four minutes on an answer that takes twenty seconds. `release`
   # still needs both, so nothing is published behind a red gate
   # ([/decisions/ad-097.md](/decisions/ad-097.md)).
+  #
+  # invariant: only the upstream repository releases. A fork's push to `main` stops here, and every job that needs
+  # this one skips with it, so a fork never reaches `npm publish`.
   decide:
+    if: github.repository == 'tech-leads-club/harness-toolkit'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -156,7 +160,7 @@ jobs:
   # it reads.
   release:
     needs: [gate, decide, verify]
-    if: needs.decide.outputs.released == 'true'
+    if: github.repository == 'tech-leads-club/harness-toolkit' && needs.decide.outputs.released == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: publish

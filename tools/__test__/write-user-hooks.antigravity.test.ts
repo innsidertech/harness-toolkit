@@ -151,6 +151,15 @@ describe("install wiring for antigravity", () => {
     assert.equal(existsSync(box.target), false);
   });
 
+  test("AGF-27: the space refusal prints the whole measured reason and exits 1", () => {
+    const box = sandbox({ hostPresent: true });
+    const spaced = join(dirname(box.runtime), "run time");
+    const result = install(box, spaced);
+    assert.equal(result.status, 1);
+    const reason = `launcher path contains a space — not wiring antigravity: ${join(spaced, "bin", "tlc-exec.mjs")}. Quoting does not help on agy 1.2.14: the host splits the hook command on spaces, a quote stays a literal character in the argument, and the hook runs with its working directory set to the hooks.json directory.`;
+    assert.ok(result.stderr.includes(reason), result.stderr);
+  });
+
   test("AGH-38: without the CLI directory the install skips and creates nothing", () => {
     const box = sandbox({ hostPresent: false });
     const result = install(box);

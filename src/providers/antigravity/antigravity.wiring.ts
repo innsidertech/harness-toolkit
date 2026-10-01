@@ -54,8 +54,9 @@ export function antigravityProjectWiringTargets(projectDir: string): string[] {
 }
 
 /**
- * hazard: the command is joined unquoted, because the host splits it on spaces with no quoting rule anyone has
- * measured. A launcher path with a space is refused by `applyAntigravityWiring` rather than quoted on a guess.
+ * hazard: the command is joined unquoted. Measured on agy 1.2.14: the host splits it on spaces, a quote stays a
+ * literal character in the argument (also under `cmd.exe /d /s /c`), and the hook runs in the hooks.json directory.
+ * So quoting cannot carry a path with a space; `applyAntigravityWiring` refuses such a launcher instead.
  */
 export function renderAntigravityGroup(entries: readonly WiringEntry[]): Record<string, unknown> {
   const group: Record<string, unknown> = {};
@@ -150,7 +151,7 @@ export function applyAntigravityWiring(wiring: ProviderWiring): AntigravityApply
     return {
       status: "refused",
       target,
-      reason: `launcher path contains a space — not wiring antigravity: ${launcherPath}`,
+      reason: `launcher path contains a space — not wiring antigravity: ${launcherPath}. Quoting does not help on agy 1.2.14: the host splits the hook command on spaces, a quote stays a literal character in the argument, and the hook runs with its working directory set to the hooks.json directory.`,
     };
   }
   let existingText: string | null;
@@ -287,7 +288,7 @@ export function antigravityWiringProblems(
  */
 export function antigravityRecoveryNotice(target: string): string[] {
   return [
-    "hooks: warning — unverified surfaces may deny every tool: Antigravity IDE 2.0.2, app 2.18.1, or a CLI newer than 1.2.13 firing this group with another payload is refused by the harness",
+    "hooks: warning — unverified surfaces may deny every tool: Antigravity IDE 2.0.2, app 2.18.1, or a CLI newer than 1.2.14 firing this group with another payload is refused by the harness",
     `hooks: recovery: remove only the "${ANTIGRAVITY_GROUP_NAME}" key from ${target} (outside agy), or delete the file when it is the only key`,
     "hooks: last resort: tlc harness uninstall --yes also removes the Claude and Cursor harness hooks, the harness-init skill links, tlc from PATH and ~/.tlc/harness",
   ];

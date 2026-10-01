@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -14,7 +15,13 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { launcherLines, NPM_MARKER, runtimeVersion, versionMoveLine } from "../../bin/tlc-cli.ts";
+import {
+  launcherLines,
+  NPM_MARKER,
+  runtimeVersion,
+  versionMoveLine,
+  wireRuntime,
+} from "../../bin/tlc-cli.ts";
 import { coreFacade } from "../../src/core/index.ts";
 import { isLink } from "../../src/platform/links.ts";
 import {
@@ -441,6 +448,55 @@ test("wireRuntime calls the launcher step", () => {
   const body = source.slice(source.indexOf("export function wireRuntime"));
 
   assert.match(body.slice(0, body.indexOf("\n}")), /launcherLines\(dest\)/);
+});
+
+/**
+ * why `wireRuntime` runs here: the home and both config-dir variables are pointed at a throwaway root, and the hook
+ * writer it spawns is an empty file in the fake package, so nothing reaches a real provider directory.
+ */
+function wireInFakeHome(antigravityPresent: boolean): { home: string; dest: string; lines: string[] } {
+  const root = tempDir("agy-skill-");
+  const home = join(root, "home");
+  const dest = join(root, "runtime");
+  mkdirSync(join(dest, "skills", "harness-init"), { recursive: true });
+  mkdirSync(join(dest, "bin"), { recursive: true });
+  writeFileSync(join(dest, "bin", "write-user-hooks.mjs"), "");
+  mkdirSync(home, { recursive: true });
+  if (antigravityPresent) {
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+  }
+  const { lines } = withEnv(
+    {
+      HOME: home,
+      USERPROFILE: home,
+      CLAUDE_CONFIG_DIR: undefined,
+      CURSOR_CONFIG_DIR: undefined,
+      TLC_BIN_DIR: join(root, "bin"),
+      TLC_HOME: join(root, "machine-runtime"),
+    },
+    () => wireRuntime(dest, dest),
+  );
+  return { home, dest, lines };
+}
+
+test("AGF-58: with the Antigravity CLI directory present, install links the init skill into it", () => {
+  const { home, dest } = wireInFakeHome(true);
+  const link = join(home, ".gemini", "antigravity-cli", "skills", "harness-init");
+  try {
+    assert.equal(isLink(link), true);
+    assert.equal(realpathSync(link), realpathSync(join(dest, "skills", "harness-init")));
+  } finally {
+    rmSync(dirname(home), { recursive: true, force: true });
+  }
+});
+
+test("AGF-58: without the Antigravity CLI directory, install creates neither the link nor the directory", () => {
+  const { home } = wireInFakeHome(false);
+  try {
+    assert.equal(existsSync(join(home, ".gemini")), false);
+  } finally {
+    rmSync(dirname(home), { recursive: true, force: true });
+  }
 });
 
 /** invariant: a launcher pointing at nothing must not be created — `existsSync` on a dangling link is false. */

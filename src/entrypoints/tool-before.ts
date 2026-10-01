@@ -338,6 +338,7 @@ export const toolBeforeHandler: Handler = async (
     command: event.command,
     isReadEvent: event.event === "read.before",
     protectedPaths: ctx.protectedPaths,
+    host: ctx.floorHostFacts,
   });
   if (floor.kind !== "allow") {
     // invariant: one rail owns the record of every shell decision. The floor short-circuits before the shell

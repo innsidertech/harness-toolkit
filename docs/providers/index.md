@@ -27,6 +27,7 @@ type ProviderPort = {
     event: HarnessEvent,
     protectedPaths: readonly string[],
   ): { filePath: string; protectedPaths: string[] } | null;
+  floorHostFacts?(event: HarnessEvent, protectedPaths: readonly string[]): FloorHostFacts | null;
 };
 ```
 
@@ -47,6 +48,10 @@ type ProviderPort = {
 - `canonicalWiringMatch` — for a host whose file paths can alias a protected target: when a write reaches one
   only through an alias, the path and targets the floor judges instead of the raw ones; `null` otherwise
   ([/decisions/ad-156.md](/decisions/ad-156.md)).
+- `floorHostFacts` — what the floor needs about this host to judge wiring routes its tool table does not show:
+  wiring names in free text, the shell's working directory, the directories that hold a target, case folding and
+  the alias-free form; absent or `null` means the floor judges with the project directory alone, and it throws
+  when a path cannot be resolved ([/decisions/ad-157.md](/decisions/ad-157.md)).
 
 ## Registered providers
 

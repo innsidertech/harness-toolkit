@@ -1,0 +1,27 @@
+{
+  "mode": "timeout",
+  "eventArg": "PreToolUse",
+  "why": "timeout-slept",
+  "cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\.agents",
+  "argvTail": [
+    "PreToolUse"
+  ],
+  "stdin": {
+    "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+    "conversationId": "<id>",
+    "modelName": "gemini-3.8-flash-high",
+    "stepIdx": 2,
+    "toolCall": {
+      "args": {
+        "AbsolutePath": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\note.txt",
+        "toolAction": "Viewing note file",
+        "toolSummary": "View note.txt"
+      },
+      "name": "view_file"
+    },
+    "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+    ]
+  }
+}

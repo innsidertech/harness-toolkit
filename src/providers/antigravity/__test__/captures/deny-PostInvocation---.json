@@ -1,0 +1,20 @@
+{
+  "mode": "deny",
+  "eventArg": "PostInvocation",
+  "why": "end",
+  "cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\.agents",
+  "argvTail": [
+    "PostInvocation"
+  ],
+  "stdin": {
+    "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+    "conversationId": "<id>",
+    "initialNumSteps": 1,
+    "invocationNum": 0,
+    "modelName": "gemini-3.8-flash-high",
+    "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+    ]
+  }
+}

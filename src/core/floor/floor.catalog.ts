@@ -18,7 +18,7 @@ export type FloorRuleDoc = {
 export const FLOOR_RULES: Record<FloorRule, FloorRuleDoc> = {
   "outside-project-destruction": {
     denies:
-      "a destructive command whose target resolves outside the repository and outside the OS temp directory",
+      "a destructive command — `rm`, `Remove-Item` and their aliases — whose target resolves outside the repository and outside the OS temp directory, and `Format-Volume`, `Clear-Disk` or `format` with any argument",
     allows: "the same command inside the repository, or inside the temp directory",
   },
   "unprovable-destruction": {
@@ -28,7 +28,7 @@ export const FLOOR_RULES: Record<FloorRule, FloorRuleDoc> = {
   },
   "secret-access": {
     denies:
-      "a read that would copy a credential into the transcript — `.env`, `~/.ssh`, `~/.aws`, `*.pem` and similar through a shell reader or the editor's own read tool, and the instance metadata service through any verb that speaks to the network",
+      "a read that would copy a credential into the transcript — `.env`, `~/.ssh`, `~/.aws`, `*.pem` and similar through a shell reader (`cat`, `Get-Content` and kin) or the editor's own read tool, and the instance metadata service through any verb that speaks to the network",
     allows: "searching local files for the literal address, because `grep` and its kin make no request",
   },
   "history-rewrite": {
@@ -36,11 +36,11 @@ export const FLOOR_RULES: Record<FloorRule, FloorRuleDoc> = {
     allows: "`--force-with-lease`, which refuses on its own when the remote moved",
   },
   "machine-control": {
-    denies: "`shutdown`, `reboot`, `halt`, `poweroff`",
+    denies: "`shutdown`, `reboot`, `halt`, `poweroff`, `Stop-Computer`, `Restart-Computer`",
   },
   "unprovable-execution": {
     denies:
-      "a program fetched over the network and handed to a shell — piped, process-substituted, or inside a shell's `-c`/`eval` substitution. The gate cannot read what would run",
+      "a program fetched over the network and handed to a shell — piped, process-substituted, or inside a shell's `-c`/`eval` substitution — or to `Invoke-Expression`. The gate cannot read what would run",
     allows: "a fetch with no shell downstream, and a shell fed a local file the gate can read",
   },
   "policy-surface-write": {

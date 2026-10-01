@@ -1,0 +1,31 @@
+{
+  "mode": "allow",
+  "eventArg": "PostToolUse",
+  "why": "end",
+  "cwd": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\.agents",
+  "argvTail": [
+    "PostToolUse"
+  ],
+  "stdin": {
+    "artifactDirectoryPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>",
+    "conversationId": "<id>",
+    "error": "",
+    "modelName": "gemini-3.8-flash-high",
+    "stepIdx": 4,
+    "toolCall": {
+      "args": {
+        "CodeContent": "ok",
+        "Description": "Write ok to out.txt",
+        "Overwrite": true,
+        "TargetFile": "C:\\Users\\dev\\AppData\\Local\\Temp\\tlc-harness-antigravity-capture\\out.txt",
+        "toolAction": "Writing out.txt",
+        "toolSummary": "Write out.txt"
+      },
+      "name": "write_to_file"
+    },
+    "transcriptPath": "C:/Users/dev/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "C:/Users/dev/AppData/Local/Temp/tlc-harness-antigravity-capture"
+    ]
+  }
+}

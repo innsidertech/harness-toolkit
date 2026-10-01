@@ -163,9 +163,18 @@ export function cursorConfigDir(): string {
  *
  * invariant: both paths are resolved, never assumed. Either tool can relocate its config directory by env, and
  * this repository is itself installed under a relocated one.
+ *
+ * why the third host's file is last: its document keeps the harness group under a named key, not under `hooks`, so
+ * it never covers a handler and never makes a project shim stand down; last, it cannot shadow a covering document
+ * above it. It is spelled inline because `src/platform` may not import `src/providers`; a test pins it to the
+ * provider's own path.
  */
 export function userSettingsPaths(): string[] {
-  return [join(claudeConfigDir(), "settings.json"), join(cursorConfigDir(), "hooks.json")];
+  return [
+    join(claudeConfigDir(), "settings.json"),
+    join(cursorConfigDir(), "hooks.json"),
+    join(homedir(), ".gemini", "config", "hooks.json"),
+  ];
 }
 
 /**
@@ -176,7 +185,7 @@ export function userSettingsPaths(): string[] {
  * itself installed under a relocated one ([/decisions/ad-095.md](/decisions/ad-095.md)).
  */
 export function providerConfigDirs(): string[] {
-  return [cursorConfigDir(), claudeConfigDir()];
+  return [cursorConfigDir(), claudeConfigDir(), join(homedir(), ".gemini", "antigravity-cli")];
 }
 
 /**

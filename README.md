@@ -106,12 +106,12 @@ prints `rule=<name>`, and the name is the first column here.
 
 | Rule | Denies | Allowed anyway |
 |---|---|---|
-| `outside-project-destruction` | a destructive command whose target resolves outside the repository and outside the OS temp directory | the same command inside the repository, or inside the temp directory |
+| `outside-project-destruction` | a destructive command — `rm`, `Remove-Item` and their aliases — whose target resolves outside the repository and outside the OS temp directory, and `Format-Volume`, `Clear-Disk` or `format` with any argument | the same command inside the repository, or inside the temp directory |
 | `unprovable-destruction` | a destructive verb whose target is a variable, a command substitution, or otherwise built at runtime — the harness cannot see what it would delete | a literal path it can resolve and check |
-| `secret-access` | a read that would copy a credential into the transcript — `.env`, `~/.ssh`, `~/.aws`, `*.pem` and similar through a shell reader or the editor's own read tool, and the instance metadata service through any verb that speaks to the network | searching local files for the literal address, because `grep` and its kin make no request |
+| `secret-access` | a read that would copy a credential into the transcript — `.env`, `~/.ssh`, `~/.aws`, `*.pem` and similar through a shell reader (`cat`, `Get-Content` and kin) or the editor's own read tool, and the instance metadata service through any verb that speaks to the network | searching local files for the literal address, because `grep` and its kin make no request |
 | `history-rewrite` | `git push --force` | `--force-with-lease`, which refuses on its own when the remote moved |
-| `machine-control` | `shutdown`, `reboot`, `halt`, `poweroff` | — |
-| `unprovable-execution` | a program fetched over the network and handed to a shell — piped, process-substituted, or inside a shell's `-c`/`eval` substitution. The gate cannot read what would run | a fetch with no shell downstream, and a shell fed a local file the gate can read |
+| `machine-control` | `shutdown`, `reboot`, `halt`, `poweroff`, `Stop-Computer`, `Restart-Computer` | — |
+| `unprovable-execution` | a program fetched over the network and handed to a shell — piped, process-substituted, or inside a shell's `-c`/`eval` substitution — or to `Invoke-Expression`. The gate cannot read what would run | a fetch with no shell downstream, and a shell fed a local file the gate can read |
 | `policy-surface-write` | every route an agent has to harness policy and state — a shell redirect, an interpreter, a heredoc program, or a write tool — in the project and under the runtime home, plus the mutating `tlc harness` subcommands from inside a session | reading them with a proven reader (`cat`, `head`, `grep`, `jq`, `ls`, `stat`, `test`), and `tlc harness handoff` for the handoff state |
 | `wiring-tamper` | a shell redirect, in-place edit, or delete into a registered provider's wiring target — the document its own editor reads to register the harness's hooks — and a direct `Edit`/`Write`/`MultiEdit` tool call against the same path — overwriting it silences every hook the harness has for that host | reading the same path with a proven reader or a read tool |
 
@@ -584,6 +584,8 @@ Full OKF v0.1 documentation bundle: [`docs/index.md`](docs/index.md).
 ## License
 
 **Elastic License 2.0** — [`LICENSE`](./LICENSE), [`NOTICE`](./NOTICE).
+
+Modified by [innsidertech/harness-toolkit](https://github.com/innsidertech/harness-toolkit) since 2026-09-30: the Antigravity provider and the changes it required. See [`NOTICE`](./NOTICE).
 
 | Allowed | Not allowed |
 |---------|-------------|
