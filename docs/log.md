@@ -13,6 +13,10 @@ Generated from `docs/decisions/` — do not edit by hand. Run `node tools/render
 A reserved file of the [OKF v0.1](/decisions/ad-013.md) bundle: entries grouped under ISO 8601 headings,
 newest first. For what landed in which npm release, see `CHANGELOG.md` at the repository root.
 
+## 2026-10-01
+
+- **AD-158** — Codex exec 0.159.3 is a provider, and a hooks.json on disk is not the floor ([/decisions/ad-158.md](/decisions/ad-158.md))
+
 ## 2026-09-30
 
 - **AD-156** — Antigravity is a provider whose every harness failure is a refusal ([/decisions/ad-156.md](/decisions/ad-156.md))

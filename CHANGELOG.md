@@ -10,6 +10,7 @@ doctor reports against your own configuration.
 
 - **AD-156** — Antigravity is a provider whose every harness failure is a refusal
 - **AD-157** — The floor reads Windows shell verbs for every host; Antigravity closes its wiring routes through an optional port
+- **AD-158** — Codex exec 0.159.3 is a provider, and a hooks.json on disk is not the floor
 
 ## v0.16.2
 
