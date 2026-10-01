@@ -322,13 +322,17 @@ describe("writer", () => {
     mkdirSync(join(profile, ".gemini", "antigravity-cli"), { recursive: true });
     const codexFile = join(codexHome, "hooks.json");
     const body = '{"kept":true}\n';
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       USERPROFILE: profile,
       HOME: profile,
       CODEX_HOME: codexHome,
       TLC_HOME: tlcHome,
     };
+    // why: the suite import sets these, and cursorConfigDir/claudeConfigDir prefer them over USERPROFILE.
+    // The presence directories above live under this profile, so the child must resolve there.
+    delete env.CURSOR_CONFIG_DIR;
+    delete env.CLAUDE_CONFIG_DIR;
     const script = join(repoRoot, "bin", "write-user-hooks.mjs");
     const realHooks = join(homedir(), ".codex", "hooks.json");
     const realBefore = existsSync(realHooks);
