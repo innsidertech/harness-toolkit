@@ -52,10 +52,10 @@ test("AGH-13: detect is false for every Cursor and Claude fixture", () => {
   }
 });
 
-test("AGH-14: the registry order is cursor, claude, antigravity", () => {
+test("AGH-14: the registry order is cursor, claude, antigravity, codex", () => {
   assert.deepEqual(
     providers.map((provider) => provider.name),
-    ["cursor", "claude", "antigravity"],
+    ["cursor", "claude", "antigravity", "codex"],
   );
 });
 

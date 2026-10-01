@@ -1,7 +1,7 @@
 ---
 type: Aggregate
 title: "Providers index"
-description: "Index of the provider adapters — Cursor, Claude Code and Antigravity — and the port they all implement."
+description: "Index of the provider adapters — Cursor, Claude Code, Antigravity and Codex — and the port they all implement."
 tags: [providers, index, architecture]
 timestamp: "2026-07-29"
 ---
@@ -63,6 +63,7 @@ matches are reported as ambiguous rather than silently resolved:
 | Cursor | camelCase `hook_event_name` + `workspace_roots` array | [/providers/cursor.md](/providers/cursor.md) |
 | Claude Code | PascalCase `hook_event_name` + `cwd` or `transcript_path` | [/providers/claude-code.md](/providers/claude-code.md) |
 | Antigravity | `conversationId` + `workspacePaths` array + `transcriptPath`, under an `antigravity:` argv token | [/providers/antigravity.md](/providers/antigravity.md) |
+| Codex | `detect` returns `false` until a fixture names stdin keys | [/providers/codex.md](/providers/codex.md) |
 
 ## Event kinds
 

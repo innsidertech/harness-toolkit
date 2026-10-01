@@ -155,6 +155,7 @@ Handoff section and a link back to this index.
 | [AD-145](/decisions/ad-145.md) | a session's last real shell cwd is recalled wherever the host reports none | active |
 | [AD-156](/decisions/ad-156.md) | Antigravity is a provider whose every harness failure is a refusal | active |
 | [AD-157](/decisions/ad-157.md) | The floor reads Windows shell verbs for every host; Antigravity closes its wiring routes through an optional port | active |
+| [AD-158](/decisions/ad-158.md) | Codex exec 0.159.3 is a provider, and a hooks.json on disk is not the floor | active |
 
 ## Archived
 

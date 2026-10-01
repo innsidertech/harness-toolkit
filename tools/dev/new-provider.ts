@@ -251,7 +251,8 @@ export function appendProviderToRegistry(text: string, name: string): string {
   if (!match) {
     throw new Error("provider.registry.ts: could not find the providers array literal");
   }
-  const existing = (match[1] ?? "").trim();
+  // why: a wrapped array keeps a trailing comma. Leaving it and appending another comma makes a hole, not an entry.
+  const existing = (match[1] ?? "").trim().replace(/,\s*$/, "");
   const appended = existing.length > 0 ? `${existing}, ${name}Provider` : `${name}Provider`;
   return withImport.replace(REGISTRY_ARRAY, `export const providers: ProviderPort[] = [${appended}];`);
 }
