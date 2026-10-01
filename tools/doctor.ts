@@ -444,10 +444,26 @@ function namedGroupChecks(
   return checks;
 }
 
+const CODEX_PRESENT_DETAIL = "Codex hooks.json is present and this check does not call it installed wiring.";
+
+/**
+ * why: `strategy: "replace"` would otherwise run the Cursor checker. A file on disk is not this host's floor,
+ * whatever its body is. Existence is the whole decision; the body is not read.
+ */
+function codexWiringCheck(target: string): Check {
+  if (!existsSync(target)) {
+    return { level: "ok", name: "codex wiring", detail: "not installed" };
+  }
+  return { level: "warn", name: "codex wiring", detail: CODEX_PRESENT_DETAIL };
+}
+
 export function checkProviders(registry: readonly ProviderPort[], home: string): Check[] {
   const launcherPath = join(home, "bin", "tlc-exec.mjs");
   return registry.flatMap((provider) => {
     const wiring = provider.wiring({ launcherPath });
+    if (provider.name === "codex") {
+      return [codexWiringCheck(wiring.target)];
+    }
     const status = providerWiringStatus(wiring);
     const check = wiringCheck(provider, wiring, status);
     return wiring.strategy === "named-group"

@@ -58,8 +58,10 @@ test("a deny or ask reaches every provider's output carrying its reason", () => 
     for (const decision of DECISIONS.filter((d) => d.kind === "deny" || d.kind === "ask")) {
       const rendered = provider.render(decision, eventOf("shell.before", provider.name));
       const reason = decision.kind === "deny" || decision.kind === "ask" ? decision.reason : "";
+      // Codex has no ask channel. The bytes carry `unsupported`, which is the refusal, not the decision's text.
+      const expected = provider.name === "codex" && decision.kind === "ask" ? "unsupported" : reason;
       assert.ok(
-        rendered.stdout?.includes(reason),
+        rendered.stdout?.includes(expected),
         `${provider.name} dropped the reason for ${decision.kind}`,
       );
     }

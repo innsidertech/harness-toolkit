@@ -7,6 +7,7 @@ import {
   applyAntigravityWiring,
 } from "../src/providers/antigravity/antigravity.wiring.ts";
 import { applyClaudeWiring } from "../src/providers/claude/claude.wiring.ts";
+import { codexHooksPath } from "../src/providers/codex/codex.paths.ts";
 import { providers } from "../src/providers/index.ts";
 
 const CURSOR_MARKER = "tlc-exec.mjs";
@@ -63,6 +64,10 @@ export function applyCursorWiring(wiring, { force = false } = {}) {
 }
 
 export function applyProviderWiring(wiring, { force = false } = {}) {
+  // why: this path is not a Cursor document. `force` still must not create or overwrite it.
+  if (wiring.target === codexHooksPath()) {
+    return { status: "unchanged", target: wiring.target };
+  }
   if (wiring.strategy === "replace") {
     return applyCursorWiring(wiring, { force });
   }
@@ -121,6 +126,12 @@ export function main() {
     const wiring = provider.wiring({ launcherPath });
     if (!isProviderHomePresent(wiring)) {
       console.log(`hooks: ${provider.name} not installed — skipping (${providerPresencePath(wiring)} not found)`);
+      continue;
+    }
+    // why: a present file, including one without the harness marker, is skipped. Refusing it would fail the
+    // other providers in this same loop and would not change the bytes.
+    if (provider.name === "codex") {
+      console.log(`hooks: codex skipped (${wiring.target})`);
       continue;
     }
     if (!report(applyProviderWiring(wiring, { force }))) {
